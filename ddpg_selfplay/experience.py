@@ -33,6 +33,13 @@ class ExperienceSource:
         self.agent = agent
         self.steps_count = steps_count
         self.steps_delta = steps_delta
+        
+        self.total_rewards_move = []
+        self.total_rewards_energy = []
+        self.total_rewards_goals = []
+        self.total_rewards_goal_score = []
+        self.total_rewards_ball_grad = []
+        
         self.total_rewards = []
         self.total_steps = []
         self.vectorized = vectorized
@@ -81,12 +88,12 @@ class ExperienceSource:
             global_ofs = 0
             for env_idx, (env, action_n) in enumerate(zip(self.pool, grouped_actions)):
                 if self.vectorized:
-                    next_state_n, r_n, is_done_n, _ = env.step(action_n)
+                    next_state_n, r_n, is_done_n, extras_n = env.step(action_n)
                 else:
                     next_state, r, is_done, _ = env.step(action_n[0])
                     next_state_n, r_n, is_done_n = [next_state], [r], [is_done]
 
-                for ofs, (action, next_state, r, is_done) in enumerate(zip(action_n, next_state_n, r_n, is_done_n)):
+                for ofs, (action, next_state, r, is_done, extras) in enumerate(zip(action_n, next_state_n, r_n, is_done_n, extras_n)):
                     idx = global_ofs + ofs
                     state = states[idx]
                     history = histories[idx]
@@ -107,6 +114,11 @@ class ExperienceSource:
                             history.popleft()
                             yield tuple(history)
                         self.total_rewards.append(cur_rewards[idx])
+                        self.total_rewards_move.append(extras['move'])
+                        self.total_rewards_energy.append(extras['energy'])
+                        self.total_rewards_goals.append(extras['goals'])
+                        self.total_rewards_goal_score.append(extras['goal_score'])
+                        self.total_rewards_ball_grad.append(extras['ball_grad'])
                         self.total_steps.append(cur_steps[idx])
                         cur_rewards[idx] = 0.0
                         cur_steps[idx] = 0
@@ -131,6 +143,20 @@ class ExperienceSource:
         if res:
             self.total_rewards, self.total_steps = [], []
         return res
+    
+    def pop_rewards_extras(self):
+        if len(self.total_rewards):
+            res = [self.total_rewards, self.total_rewards_move, self.total_rewards_energy, self.total_rewards_goals, self.total_rewards_goal_score, self.total_rewards_ball_grad]
+            if res:
+                self.total_rewards = []
+                self.total_rewards_move = []
+                self.total_rewards_energy = []
+                self.total_rewards_goals = []
+                self.total_rewards_goal_score = []
+                self.total_rewards_ball_grad = []
+            return res
+        else:
+            return []
 
 
 def _group_list(items, lens):

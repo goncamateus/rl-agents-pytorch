@@ -21,11 +21,11 @@ from experience import ExperienceSourceFirstLast
 ENV = 'VSS1v1SelfPlay-v0'
 PROCESSES_COUNT = 3
 LEARNING_RATE = 0.0001
-LEARNING_RATE_ACT = 0.00001
+LEARNING_RATE_ACT = 0.0001
 REPLAY_SIZE = 2000000
 # REPLAY_INITIAL = 100000
-REPLAY_INITIAL = 256
-CRITIC_INITIAL = 1500000
+REPLAY_INITIAL = 100000
+CRITIC_INITIAL = 100000
 BATCH_SIZE = 256
 GAMMA = 0.95
 REWARD_STEPS = 2
@@ -177,8 +177,7 @@ class RewardTracker:
         return False
 
 
-TotalReward = collections.namedtuple('TotalReward', field_names='reward')
-
+TotalReward = collections.namedtuple('TotalReward', ['reward', 'move', 'energy', 'goals','goal_score', 'ball_grad'])
 
 def unpack_batch_ddqn(batch, device="cpu"):
     states, actions, rewards, dones, last_states = [], [], [], [], []
@@ -229,9 +228,9 @@ def data_func(act_net, device, train_queue):
         env, agent, gamma=GAMMA, steps_count=REWARD_STEPS, vectorized=True)
 
     for exp in exp_source:
-        new_rewards = exp_source.pop_total_rewards()
+        new_rewards = exp_source.pop_rewards_extras()
         if new_rewards:
-            data = TotalReward(reward=np.mean(new_rewards))
+            data = TotalReward(reward=np.mean(new_rewards[0]), move=np.mean(new_rewards[1]), energy=np.mean(new_rewards[2]), goals=np.mean(new_rewards[3]),goal_score=np.mean(new_rewards[4]), ball_grad=np.mean(new_rewards[5]))
             train_queue.put(data)
 
         train_queue.put(exp)
@@ -253,8 +252,6 @@ if __name__ == "__main__":
     act_net = DDPGActor(40,2).to(device)
     init_net = DDPGActor(40,2).to(device)
     if args.model:
-        print(args.model)
-        act_net.load_state_dict(torch.load(args.model))
         init_net.load_state_dict(torch.load(args.model))
     act_net.share_memory()
     crt_net = DDPGCritic(40,2).to(device)
@@ -298,6 +295,11 @@ if __name__ == "__main__":
 
                         if isinstance(exp, TotalReward):
                             tracker.reward(exp.reward, n_samples)
+                            tb_tracker.track("move", exp.move, n_samples)
+                            tb_tracker.track("energy", exp.energy, n_samples)
+                            tb_tracker.track("goals", exp.goals, n_samples)
+                            tb_tracker.track("goal_score", exp.goal_score, n_samples)
+                            tb_tracker.track("ball_grad", exp.ball_grad, n_samples)
                             continue
 
                         buffer.add(exp)
@@ -337,15 +339,14 @@ if __name__ == "__main__":
                         states_v, cur_actions_v)
                     actor_loss_v = actor_loss_v.mean()
                     actor_loss_v.backward()
-                    if len(buffer) > CRITIC_INITIAL:
-                        act_opt.step()
+                    act_opt.step()
                     tb_tracker.track("loss_actor",
                                      actor_loss_v, n_iter)
 
                     tgt_act_net.alpha_sync(alpha=1 - 1e-3)
                     tgt_crt_net.alpha_sync(alpha=1 - 1e-3)
 
-                    if n_iter % SAVE_FREQUENCY == 1:
+                    if n_iter % SAVE_FREQUENCY == 0:
                         fname = os.path.join(save_path, "model_act_{}".format(n_iter))
                         torch.save(act_net.state_dict(), fname)
                         fname = os.path.join(save_path, "model_act_latest")
