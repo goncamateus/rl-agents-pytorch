@@ -19,14 +19,17 @@ import rc_gym
 from experience import ExperienceSourceFirstLast
 
 ENV = 'VSS1v1SelfPlay-v0'
-PROCESSES_COUNT = 1
+PROCESSES_COUNT = 3
 LEARNING_RATE = 0.0001
+LEARNING_RATE_ACT = 0.00001
 REPLAY_SIZE = 2000000
-REPLAY_INITIAL = 100000
+# REPLAY_INITIAL = 100000
+REPLAY_INITIAL = 256
+CRITIC_INITIAL = 1500000
 BATCH_SIZE = 256
 GAMMA = 0.95
 REWARD_STEPS = 2
-SAVE_FREQUENCY = 10000
+SAVE_FREQUENCY = 100000
 # Q_SIZE = 1
 
 
@@ -195,6 +198,29 @@ def unpack_batch_ddqn(batch, device="cpu"):
     dones_t = torch.BoolTensor(dones).to(device)
     return states_v, actions_v, rewards_v, dones_t, last_states_v
 
+def test_net(net_1, net_2, env, count=5, device="cpu"):
+    rewards = 0.0
+    steps = 0
+    for _ in range(count):
+        obs = env.reset()
+        while True:
+            obs_v = ptan.agent.float32_preprocessor([obs[0]]).to(device)
+            mu_v = net_1(obs_v)
+            action = mu_v.squeeze(dim=0).data.cpu().numpy()
+            action_1 = np.clip(action, -1, 1)
+            
+            obs_v = ptan.agent.float32_preprocessor([obs[1]]).to(device)
+            mu_v = net_2(obs_v)
+            action = mu_v.squeeze(dim=0).data.cpu().numpy()
+            action_2 = np.clip(action, -1, 1)
+
+            obs, reward, done, _ = env.step([action_1, action_2])
+
+            rewards += reward[0]
+            steps += 1
+            if done[0]:
+                break
+    return rewards / count, steps / count
 
 def data_func(act_net, device, train_queue):
     env = gym.make(ENV)
@@ -203,7 +229,6 @@ def data_func(act_net, device, train_queue):
         env, agent, gamma=GAMMA, steps_count=REWARD_STEPS, vectorized=True)
 
     for exp in exp_source:
-        env.env.render()
         new_rewards = exp_source.pop_total_rewards()
         if new_rewards:
             data = TotalReward(reward=np.mean(new_rewards))
@@ -226,9 +251,11 @@ if __name__ == "__main__":
 
 
     act_net = DDPGActor(40,2).to(device)
+    init_net = DDPGActor(40,2).to(device)
     if args.model:
         print(args.model)
         act_net.load_state_dict(torch.load(args.model))
+        init_net.load_state_dict(torch.load(args.model))
     act_net.share_memory()
     crt_net = DDPGCritic(40,2).to(device)
 
@@ -249,13 +276,15 @@ if __name__ == "__main__":
 
     tgt_act_net = ptan.agent.TargetNet(act_net)
     tgt_crt_net = ptan.agent.TargetNet(crt_net)
-    act_opt = optim.Adam(act_net.parameters(), lr=LEARNING_RATE)
+    act_opt = optim.Adam(act_net.parameters(), lr=LEARNING_RATE_ACT)
     crt_opt = optim.Adam(crt_net.parameters(), lr=LEARNING_RATE)
     buffer = ExperienceReplayBuffer(buffer_size=REPLAY_SIZE)
     n_iter = 0
     n_samples = 0
     finish_event = mp.Event()
-
+    test_env = gym.make(ENV)
+    best_reward = None
+    
     try:
         with ptan.common.utils.RewardTracker(writer) as tracker:
             with ptan.common.utils.TBMeanTracker(
@@ -276,7 +305,6 @@ if __name__ == "__main__":
 
                     if len(buffer) < REPLAY_INITIAL:
                         continue
-                    n_iter += 1
 
                     batch = buffer.sample(BATCH_SIZE)
                     states_v, actions_v, rewards_v, \
@@ -309,27 +337,49 @@ if __name__ == "__main__":
                         states_v, cur_actions_v)
                     actor_loss_v = actor_loss_v.mean()
                     actor_loss_v.backward()
-                    act_opt.step()
+                    if len(buffer) > CRITIC_INITIAL:
+                        act_opt.step()
                     tb_tracker.track("loss_actor",
                                      actor_loss_v, n_iter)
 
                     tgt_act_net.alpha_sync(alpha=1 - 1e-3)
                     tgt_crt_net.alpha_sync(alpha=1 - 1e-3)
 
+                    if n_iter % SAVE_FREQUENCY == 1:
+                        fname = os.path.join(save_path, "model_act_{}".format(n_iter))
+                        torch.save(act_net.state_dict(), fname)
+                        fname = os.path.join(save_path, "model_act_latest")
+                        torch.save(act_net.state_dict(), fname)
+                        fname = os.path.join(save_path, "model_crt_latest")
+                        torch.save(crt_net.state_dict(), fname)
+
+                        ts = time.time()
+                        rewards, steps = test_net(act_net, init_net, test_env, device=device)
+                        print("Test done in %.2f sec, reward %.3f, steps %d" % (
+                            time.time() - ts, rewards, steps))
+                        writer.add_scalar("test_reward", rewards, n_iter)
+                        if best_reward is None or best_reward < rewards:
+                            if best_reward is not None:
+                                print("Best reward updated: %.3f -> %.3f" % (best_reward, rewards))
+                                name = "best_%+.3f_%d.dat" % (rewards, n_iter)
+                                fname = os.path.join(save_path, "model_act_best")
+                                torch.save(act_net.state_dict(), fname)
+                            best_reward = rewards
+                    
+                    n_iter += 1
+
                     tb_tracker.track("sample/train ratio",
                                      (n_samples/n_iter), n_iter)
 
-                    if n_iter % SAVE_FREQUENCY == 0:
-                        fname = os.path.join(save_path, "model_{}".format(n_iter))
-                        torch.save(act_net.state_dict(), fname)
+
 
     except KeyboardInterrupt:
         print("...Finishing...")
         finish_event.set()
 
-    except Exception:
-        print("!!! Exception caught on main !!!")
-        finish_event.set()
+    # except Exception:
+    #     print("!!! Exception caught on main !!!")
+    #     finish_event.set()
 
     finally:
         if train_queue:
