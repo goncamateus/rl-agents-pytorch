@@ -54,7 +54,6 @@ if __name__ == "__main__":
 
     env = gym.make(args.env)
 
-    print(env.observation_space.shape[0], env.action_space.shape[0])
     net = DDPGActor(env.observation_space.shape[0], env.action_space.shape[0])
     net.load_state_dict(torch.load(args.model))
 
@@ -66,9 +65,6 @@ if __name__ == "__main__":
         mu_v = net(obs_v)
         action = mu_v.squeeze(dim=0).data.numpy()
         action = np.clip(action, -1, 1)
-        print(obs_v)
-        # time.sleep(1)
-        action = [0.,0.]
         obs, reward, done, _ = env.step(action)
         env.render('human')
         total_reward += reward
