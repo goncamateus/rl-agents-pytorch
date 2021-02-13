@@ -16,6 +16,8 @@ from tensorboardX import SummaryWriter
 
 import rc_gym
 
+from experience import ExperienceSourceFirstLast
+
 ENV = 'VSS1v1SelfPlay-v0'
 PROCESSES_COUNT = 1
 LEARNING_RATE = 0.0001
@@ -197,7 +199,7 @@ def unpack_batch_ddqn(batch, device="cpu"):
 def data_func(act_net, device, train_queue):
     env = gym.make(ENV)
     agent = AgentDDPG(act_net, device=device)
-    exp_source = ptan.experience.ExperienceSourceFirstLast(
+    exp_source = ExperienceSourceFirstLast(
         env, agent, gamma=GAMMA, steps_count=REWARD_STEPS, vectorized=True)
 
     for exp in exp_source:
@@ -318,7 +320,7 @@ if __name__ == "__main__":
                                      (n_samples/n_iter), n_iter)
 
                     if n_iter % SAVE_FREQUENCY == 0:
-                        fname = os.path.join(save_path, "model")
+                        fname = os.path.join(save_path, "model_{}".format(n_iter))
                         torch.save(act_net.state_dict(), fname)
 
     except KeyboardInterrupt:
