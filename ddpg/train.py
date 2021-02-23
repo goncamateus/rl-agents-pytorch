@@ -19,8 +19,8 @@ import rc_gym
 ENV = 'VSS3v3-v0'
 PROCESSES_COUNT = 3
 LEARNING_RATE = 0.0001
-REPLAY_SIZE = 2000000
-REPLAY_INITIAL = 100000
+REPLAY_SIZE = 5000000
+REPLAY_INITIAL = 300000
 BATCH_SIZE = 256
 GAMMA = 0.95
 REWARD_STEPS = 2
@@ -209,6 +209,27 @@ def data_func(act_net, device, train_queue):
         train_queue.put(exp)
 
 
+def test_net(net, env, count=3, device="cpu"):
+    rewards = 0.0
+    goal_score = 0
+    for _ in range(count):
+        obs = env.reset()
+        while True:
+            obs_v = ptan.agent.float32_preprocessor([obs]).to(device)
+            mu_v = net_1(obs_v)
+            action = mu_v.squeeze(dim=0).data.cpu().numpy()
+            action = np.clip(action, -1, 1)
+
+            obs, reward, done, extra = env.step(action)
+            # env.env.render()
+            rewards += reward
+            steps += 1
+            if done:
+                rewards += extra['goal_score']
+                break
+    return rewards / count, steps / count
+
+
 if __name__ == "__main__":
     mp.set_start_method('spawn')
     os.environ['OMP_NUM_THREADS'] = "1"
@@ -220,17 +241,15 @@ if __name__ == "__main__":
     args = parser.parse_args()
     device = "cuda" if args.cuda else "cpu"
 
-    env = gym.make(ENV)
+    test_env = gym.make(ENV)
 
     act_net = DDPGActor(
-        env.observation_space.shape[0],
-        env.action_space.shape[0]).to(device)
+        test_env.observation_space.shape[0],
+        test_env.action_space.shape[0]).to(device)
     act_net.share_memory()
     crt_net = DDPGCritic(
-        env.observation_space.shape[0],
-        env.action_space.shape[0]).to(device)
-
-    del(env)
+        test_env.observation_space.shape[0],
+        test_env.action_space.shape[0]).to(device)
 
     # Playing
     train_queue = mp.Queue(maxsize=BATCH_SIZE)
@@ -254,6 +273,7 @@ if __name__ == "__main__":
     n_iter = 0
     n_samples = 0
     finish_event = mp.Event()
+    best_reward = None
 
     try:
         with ptan.common.utils.RewardTracker(writer) as tracker:
@@ -275,7 +295,6 @@ if __name__ == "__main__":
 
                     if len(buffer) < REPLAY_INITIAL:
                         continue
-                    n_iter += 1
 
                     batch = buffer.sample(BATCH_SIZE)
                     states_v, actions_v, rewards_v, \
@@ -315,19 +334,38 @@ if __name__ == "__main__":
                     tgt_act_net.alpha_sync(alpha=1 - 1e-3)
                     tgt_crt_net.alpha_sync(alpha=1 - 1e-3)
 
+                    if n_iter % SAVE_FREQUENCY == 0:
+                        fname = os.path.join(save_path, "model_act_{}".format(n_iter))
+                        torch.save(act_net.state_dict(), fname)
+                        fname = os.path.join(save_path, "model_act_latest")
+                        torch.save(act_net.state_dict(), fname)
+                        fname = os.path.join(save_path, "model_crt_latest")
+                        torch.save(crt_net.state_dict(), fname)
+
+                        ts = time.time()
+                        rewards, goals_score = test_net(act_net, test_env, device=device)
+                        print("Test done in %.2f sec, reward %.3f, goal_score %d" % (
+                            time.time() - ts, rewards, goal_score))
+                        writer.add_scalar("test_rewards", rewards, n_iter)
+                        writer.add_scalar("test_goals_score", goal_score, n_iter)
+                        
+                        if best_reward is None or best_reward < rewards:
+                            if best_reward is not None:
+                                print("Best reward updated: %.3f -> %.3f" % (best_reward, rewards))
+                                name = "best_%+.3f_%d.dat" % (rewards, n_iter)
+                                fname = os.path.join(save_path, "model_act_best")
+                                torch.save(act_net.state_dict(), fname)
+                            best_reward = rewards
+                    
+                    
+                    n_iter += 1
+                    
+                    
                     tb_tracker.track("sample/train ratio",
                                      (n_samples/n_iter), n_iter)
 
-                    if n_iter % SAVE_FREQUENCY == 0:
-                        fname = os.path.join(save_path, "model")
-                        torch.save(act_net.state_dict(), fname)
-
     except KeyboardInterrupt:
         print("...Finishing...")
-        finish_event.set()
-
-    except Exception:
-        print("!!! Exception caught on main !!!")
         finish_event.set()
 
     finally:
