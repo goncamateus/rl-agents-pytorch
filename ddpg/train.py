@@ -216,18 +216,17 @@ def test_net(net, env, count=3, device="cpu"):
         obs = env.reset()
         while True:
             obs_v = ptan.agent.float32_preprocessor([obs]).to(device)
-            mu_v = net_1(obs_v)
+            mu_v = net(obs_v)
             action = mu_v.squeeze(dim=0).data.cpu().numpy()
             action = np.clip(action, -1, 1)
 
             obs, reward, done, extra = env.step(action)
             # env.env.render()
             rewards += reward
-            steps += 1
             if done:
-                rewards += extra['goal_score']
+                goal_score += extra['goal_score']
                 break
-    return rewards / count, steps / count
+    return rewards / count, goal_score / count
 
 
 if __name__ == "__main__":
@@ -344,10 +343,10 @@ if __name__ == "__main__":
 
                         ts = time.time()
                         rewards, goals_score = test_net(act_net, test_env, device=device)
-                        print("Test done in %.2f sec, reward %.3f, goal_score %d" % (
-                            time.time() - ts, rewards, goal_score))
+                        print("Test done in %.2f sec, reward %.3f, goals_score %d" % (
+                            time.time() - ts, rewards, goals_score))
                         writer.add_scalar("test_rewards", rewards, n_iter)
-                        writer.add_scalar("test_goals_score", goal_score, n_iter)
+                        writer.add_scalar("test_goals_score", goals_score, n_iter)
                         
                         if best_reward is None or best_reward < rewards:
                             if best_reward is not None:
