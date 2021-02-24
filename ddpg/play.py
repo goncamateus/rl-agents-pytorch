@@ -16,7 +16,7 @@ from tensorboardX import SummaryWriter
 
 import rc_gym
 
-ENV = 'VSS3v3-v0'
+ENV = 'VSSDetGkDef-v0'
 PROCESSES_COUNT = 3
 LEARNING_RATE = 0.0001
 REPLAY_SIZE = 2000000

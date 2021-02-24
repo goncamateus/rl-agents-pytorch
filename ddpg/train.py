@@ -16,8 +16,8 @@ from tensorboardX import SummaryWriter
 
 import rc_gym
 
-ENV = 'VSS3v3-v0'
-PROCESSES_COUNT = 3
+ENV = 'VSSDetGkDef-v0'
+PROCESSES_COUNT = 5
 LEARNING_RATE = 0.0001
 REPLAY_SIZE = 5000000
 REPLAY_INITIAL = 300000
@@ -212,6 +212,7 @@ def data_func(act_net, device, train_queue):
 def test_net(net, env, count=3, device="cpu"):
     rewards = 0.0
     goal_score = 0
+    penalties = 0
     for _ in range(count):
         obs = env.reset()
         while True:
@@ -225,8 +226,9 @@ def test_net(net, env, count=3, device="cpu"):
             rewards += reward
             if done:
                 goal_score += extra['goal_score']
+                penalties += extra['penalties']
                 break
-    return rewards / count, goal_score / count
+    return rewards / count, goal_score / count, penalties / count
 
 
 if __name__ == "__main__":
@@ -342,11 +344,12 @@ if __name__ == "__main__":
                         torch.save(crt_net.state_dict(), fname)
 
                         ts = time.time()
-                        rewards, goals_score = test_net(act_net, test_env, device=device)
+                        rewards, goals_score, penalties = test_net(act_net, test_env, device=device)
                         print("Test done in %.2f sec, reward %.3f, goals_score %d" % (
                             time.time() - ts, rewards, goals_score))
-                        writer.add_scalar("test_rewards", rewards, n_iter)
-                        writer.add_scalar("test_goals_score", goals_score, n_iter)
+                        writer.add_scalar("test/rewards", rewards, n_iter)
+                        writer.add_scalar("test/goals_score", goals_score, n_iter)
+                        writer.add_scalar("test/penalties", penalties, n_iter)
                         
                         if best_reward is None or best_reward < rewards:
                             if best_reward is not None:
