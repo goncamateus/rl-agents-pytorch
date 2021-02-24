@@ -1,4 +1,4 @@
-import os
+import os, sys
 import argparse
 import collections
 
@@ -212,7 +212,7 @@ def data_func(act_net, device, train_queue):
 def test_net(net, env, count=3, device="cpu"):
     rewards = 0.0
     goal_score = 0
-    penalties = 0
+    extra = None
     for _ in range(count):
         obs = env.reset()
         while True:
@@ -221,14 +221,20 @@ def test_net(net, env, count=3, device="cpu"):
             action = mu_v.squeeze(dim=0).data.cpu().numpy()
             action = np.clip(action, -1, 1)
 
-            obs, reward, done, extra = env.step(action)
+            obs, reward, done, info = env.step(action)
             # env.env.render()
             rewards += reward
             if done:
+                if extra == None:
+                    extra = info
+                else:
+                    for key, value in info.items():
+                        extra[key] += value
                 goal_score += extra['goal_score']
-                penalties += extra['penalties']
                 break
-    return rewards / count, goal_score / count, penalties / count
+    for key, value in extra.items():
+            extra[key] += value / 2
+    return rewards / count, extra
 
 
 if __name__ == "__main__":
@@ -242,7 +248,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     device = "cuda" if args.cuda else "cpu"
 
-    test_env = gym.make(ENV)
+    test_env = gym.make('VSSDetGkDefTest-v0')
 
     act_net = DDPGActor(
         test_env.observation_space.shape[0],
@@ -251,6 +257,9 @@ if __name__ == "__main__":
     crt_net = DDPGCritic(
         test_env.observation_space.shape[0],
         test_env.action_space.shape[0]).to(device)
+
+    # act_net.load_state_dict(torch.load("saves/resume/model_act_latest"))
+    # crt_net.load_state_dict(torch.load("saves/resume/model_crt_latest"))
 
     # Playing
     train_queue = mp.Queue(maxsize=BATCH_SIZE)
@@ -344,12 +353,12 @@ if __name__ == "__main__":
                         torch.save(crt_net.state_dict(), fname)
 
                         ts = time.time()
-                        rewards, goals_score, penalties = test_net(act_net, test_env, device=device)
-                        print("Test done in %.2f sec, reward %.3f, goals_score %d" % (
-                            time.time() - ts, rewards, goals_score))
+                        rewards, info = test_net(act_net, test_env, device=device)
+                        print("Test done in %.2f sec, reward %.3f" % (
+                            time.time() - ts, rewards))
                         writer.add_scalar("test/rewards", rewards, n_iter)
-                        writer.add_scalar("test/goals_score", goals_score, n_iter)
-                        writer.add_scalar("test/penalties", penalties, n_iter)
+                        for key, value in info.items():
+                            writer.add_scalar("test/{}".format(key), value, n_iter)
                         
                         if best_reward is None or best_reward < rewards:
                             if best_reward is not None:
