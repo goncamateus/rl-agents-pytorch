@@ -233,7 +233,7 @@ def test_net(net, env, count=3, device="cpu"):
                 goal_score += extra['goal_score']
                 break
     for key, value in extra.items():
-            extra[key] += value / 2
+            extra[key] += value / count
     return rewards / count, extra
 
 
