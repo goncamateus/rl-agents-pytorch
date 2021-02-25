@@ -17,6 +17,10 @@ from tensorboardX import SummaryWriter
 
 import rc_gym
 
+import datetime
+
+
+
 ENV = 'VSSDetGkDefTest-v0'
 PROCESSES_COUNT = 3
 LEARNING_RATE = 0.0001
@@ -63,6 +67,8 @@ if __name__ == "__main__":
     total_reward = 0.0
     total_steps = 0
     while True:
+        start_time = datetime.datetime.now()
+        
         obs_v = torch.FloatTensor([obs])
         mu_v = net(obs_v)
         action = mu_v.squeeze(dim=0).data.numpy()
@@ -71,6 +77,10 @@ if __name__ == "__main__":
         env.render('human')
         total_reward += reward
         total_steps += 1
+        elapsed = datetime.datetime.now() - start_time
+        while elapsed.total_seconds() * 1000 < 32:
+            time.sleep(0.0001)
+            elapsed = datetime.datetime.now() - start_time
         if done:
             break
     print("In %d steps we got %.3f reward" % (total_steps, total_reward))
