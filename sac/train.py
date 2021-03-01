@@ -1,69 +1,36 @@
-import os, sys
-import argparse
-import collections
-
-import gym
+#!/usr/bin/env python3
+import os
 import ptan
+import gym
+import math
 import time
+import pybullet_envs
+import argparse
+from tensorboardX import SummaryWriter
+import collections
 import numpy as np
 
 import torch
-import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
+import torch.distributions as distr
+import torch.nn as nn
 import torch.multiprocessing as mp
-from tensorboardX import SummaryWriter
+import torch.nn.functional as F
 
 import rc_gym
 
 ENV = 'VSS3v3-v0'
-PROCESSES_COUNT = 2
+PROCESSES_COUNT = 3
 LEARNING_RATE = 0.0001
-REPLAY_SIZE = 1500000
-REPLAY_INITIAL = 150000
+REPLAY_SIZE = 5000000
+REPLAY_INITIAL = 256
+LR_ACTS = 1e-4
+LR_VALS = 1e-4
 BATCH_SIZE = 256
 GAMMA = 0.95
 REWARD_STEPS = 2
-SAVE_FREQUENCY = 40000
-# Q_SIZE = 1
-
-
-class DDPGActor(nn.Module):
-    def __init__(self, obs_size, act_size):
-        super(DDPGActor, self).__init__()
-
-        self.net = nn.Sequential(
-            nn.Linear(obs_size, 400),
-            nn.ReLU(),
-            nn.Linear(400, 300),
-            nn.ReLU(),
-            nn.Linear(300, act_size),
-            nn.Tanh()
-        )
-
-    def forward(self, x):
-        return self.net(x)
-
-
-class DDPGCritic(nn.Module):
-    def __init__(self, obs_size, act_size):
-        super(DDPGCritic, self).__init__()
-
-        self.obs_net = nn.Sequential(
-            nn.Linear(obs_size, 400),
-            nn.ReLU(),
-        )
-
-        self.out_net = nn.Sequential(
-            nn.Linear(400 + act_size, 300),
-            nn.ReLU(),
-            nn.Linear(300, 1)
-        )
-
-    def forward(self, x, a):
-        obs = self.obs_net(x)
-        return self.out_net(torch.cat([obs, a], dim=1))
-
+SAVE_FREQUENCY = 20000
+SAC_ENTROPY_ALPHA = 0.1
 
 class AgentDDPG(ptan.agent.BaseAgent):
     """
@@ -108,6 +75,61 @@ class AgentDDPG(ptan.agent.BaseAgent):
         actions = np.clip(actions, -1, 1)
         return actions, new_a_states
 
+class ModelActor(nn.Module):
+    def __init__(self, obs_size, act_size):
+        super(ModelActor, self).__init__()
+
+        self.mu = nn.Sequential(
+            nn.Linear(obs_size, 400),
+            nn.Tanh(),
+            nn.Linear(400, 300),
+            nn.Tanh(),
+            nn.Linear(300, act_size),
+            nn.Tanh(),
+        )
+        self.logstd = nn.Parameter(torch.zeros(act_size))
+
+    def forward(self, x):
+        return self.mu(x)
+
+class ModelCritic(nn.Module):
+    def __init__(self, obs_size):
+        super(ModelCritic, self).__init__()
+
+        self.value = nn.Sequential(
+            nn.Linear(obs_size, 400),
+            nn.ReLU(),
+            nn.Linear(400, 300),
+            nn.ReLU(),
+            nn.Linear(300, 1),
+        )
+
+    def forward(self, x):
+        return self.value(x)
+
+class ModelSACTwinQ(nn.Module):
+    def __init__(self, obs_size, act_size):
+        super(ModelSACTwinQ, self).__init__()
+
+        self.q1 = nn.Sequential(
+            nn.Linear(obs_size + act_size, 400),
+            nn.ReLU(),
+            nn.Linear(400, 300),
+            nn.ReLU(),
+            nn.Linear(300, 1),
+        )
+
+        self.q2 = nn.Sequential(
+            nn.Linear(obs_size + act_size, 400),
+            nn.ReLU(),
+            nn.Linear(400, 300),
+            nn.ReLU(),
+            nn.Linear(300, 1),
+        )
+
+    def forward(self, obs, act):
+        x = torch.cat([obs, act], dim=1)
+        return self.q1(x), self.q2(x)
 
 class ExperienceReplayBuffer:
     def __init__(self, buffer_size):
@@ -134,7 +156,6 @@ class ExperienceReplayBuffer:
         else:
             self.buffer[self.pos] = sample
         self.pos = (self.pos + 1) % self.capacity
-
 
 class RewardTracker:
     def __init__(self, writer, stop_reward):
@@ -171,28 +192,63 @@ class RewardTracker:
             return True
         return False
 
-
 TotalReward = collections.namedtuple('TotalReward', field_names='reward')
 
 
-def unpack_batch_ddqn(batch, device="cpu"):
-    states, actions, rewards, dones, last_states = [], [], [], [], []
-    for exp in batch:
+def unpack_batch_a2c(batch, net, last_val_gamma, device="cpu"):
+    """
+    Convert batch into training tensors
+    :param batch:
+    :param net:
+    :return: states variable, actions tensor, reference values variable
+    """
+    states = []
+    actions = []
+    rewards = []
+    not_done_idx = []
+    last_states = []
+    for idx, exp in enumerate(batch):
         states.append(exp.state)
         actions.append(exp.action)
         rewards.append(exp.reward)
-        dones.append(exp.last_state is None)
-        if exp.last_state is None:
-            last_states.append(exp.state)
-        else:
+        if exp.last_state is not None:
+            not_done_idx.append(idx)
             last_states.append(exp.last_state)
     states_v = ptan.agent.float32_preprocessor(states).to(device)
-    actions_v = ptan.agent.float32_preprocessor(actions).to(device)
-    rewards_v = ptan.agent.float32_preprocessor(rewards).to(device)
-    last_states_v = ptan.agent.float32_preprocessor(last_states).to(device)
-    dones_t = torch.BoolTensor(dones).to(device)
-    return states_v, actions_v, rewards_v, dones_t, last_states_v
+    actions_v = torch.FloatTensor(actions).to(device)
 
+    # handle rewards
+    rewards_np = np.array(rewards, dtype=np.float32)
+    if not_done_idx:
+        last_states_v = ptan.agent.float32_preprocessor(last_states).to(device)
+        last_vals_v = net(last_states_v)
+        last_vals_np = last_vals_v.data.cpu().numpy()[:, 0]
+        rewards_np[not_done_idx] += last_val_gamma * last_vals_np
+
+    ref_vals_v = torch.FloatTensor(rewards_np).to(device)
+    return states_v, actions_v, ref_vals_v
+
+
+
+@torch.no_grad()
+def unpack_batch_sac(batch, val_net, twinq_net, policy_net,
+                     gamma: float, ent_alpha: float,
+                     device="cpu"):
+    """
+    Unpack Soft Actor-Critic batch
+    """
+    states_v, actions_v, ref_q_v = \
+        unpack_batch_a2c(batch, val_net, gamma, device)
+
+    # references for the critic network
+    mu_v = policy_net(states_v)
+    act_dist = distr.Normal(mu_v, torch.exp(policy_net.logstd))
+    acts_v = act_dist.sample()
+    q1_v, q2_v = twinq_net(states_v, acts_v)
+    # element-wise minimum
+    ref_vals_v = torch.min(q1_v, q2_v).squeeze() - \
+                 ent_alpha * act_dist.log_prob(acts_v).sum(dim=1)
+    return states_v, actions_v, ref_vals_v, ref_q_v
 
 def data_func(act_net, device, train_queue):
     env = gym.make(ENV)
@@ -208,35 +264,24 @@ def data_func(act_net, device, train_queue):
 
         train_queue.put(exp)
 
-
 def test_net(net, env, count=3, device="cpu"):
     rewards = 0.0
     goal_score = 0
-    extra = None
     for _ in range(count):
         obs = env.reset()
-        
         while True:
-            obs_v = ptan.agent.float32_preprocessor(obs).to(device)
+            obs_v = ptan.agent.float32_preprocessor([obs]).to(device)
             mu_v = net(obs_v)
             action = mu_v.squeeze(dim=0).data.cpu().numpy()
             action = np.clip(action, -1, 1)
 
-            obs, reward, done, info = env.step(action)
+            obs, reward, done, extra = env.step(action)
             # env.env.render()
             rewards += reward
             if done:
-                if extra == None:
-                    extra = info
-                else:
-                    for key, value in info.items():
-                        extra[key] += value
                 goal_score += extra['goal_score']
                 break
-    for key, value in extra.items():
-            extra[key] += value / count
-    return rewards / count, extra
-
+    return rewards / count, goal_score / count
 
 if __name__ == "__main__":
     mp.set_start_method('spawn')
@@ -249,19 +294,22 @@ if __name__ == "__main__":
     args = parser.parse_args()
     device = "cuda" if args.cuda else "cpu"
 
-    test_env = gym.make('VSSDetGkDefTest-v0')
 
-    act_net = DDPGActor(
+    test_env = gym.make(ENV)
+
+    act_net = ModelActor(
         test_env.observation_space.shape[0],
         test_env.action_space.shape[0]).to(device)
-    act_net.share_memory()
-    crt_net = DDPGCritic(
+    crt_net = ModelCritic(
+        test_env.observation_space.shape[0]
+    ).to(device)
+    twinq_net = ModelSACTwinQ(
         test_env.observation_space.shape[0],
         test_env.action_space.shape[0]).to(device)
-
-    # act_net.load_state_dict(torch.load("saves/resume/model_act_latest"))
-    # crt_net.load_state_dict(torch.load("saves/resume/model_crt_latest"))
-
+    print(act_net)
+    print(crt_net)
+    print(twinq_net)
+    
     # Playing
     train_queue = mp.Queue(maxsize=BATCH_SIZE)
     data_proc_list = []
@@ -272,26 +320,26 @@ if __name__ == "__main__":
         data_proc_list.append(data_proc)
 
     # Training
-    writer = SummaryWriter(comment="-ddpg_" + args.name)
-    save_path = os.path.join("saves", "ddpg-" + args.name)
+    writer = SummaryWriter(comment="-sac_" + args.name)
+    save_path = os.path.join("saves", "sac-" + args.name)
     os.makedirs(save_path, exist_ok=True)
 
-    tgt_act_net = ptan.agent.TargetNet(act_net)
     tgt_crt_net = ptan.agent.TargetNet(crt_net)
-    act_opt = optim.Adam(act_net.parameters(), lr=LEARNING_RATE)
-    crt_opt = optim.Adam(crt_net.parameters(), lr=LEARNING_RATE)
+    act_opt = optim.Adam(act_net.parameters(), lr=LR_ACTS)
+    crt_opt = optim.Adam(crt_net.parameters(), lr=LR_VALS)
+    twinq_opt = optim.Adam(twinq_net.parameters(), lr=LR_VALS)
     buffer = ExperienceReplayBuffer(buffer_size=REPLAY_SIZE)
     n_iter = 0
     n_samples = 0
     finish_event = mp.Event()
     best_reward = None
-
+    
     try:
         with ptan.common.utils.RewardTracker(writer) as tracker:
             with ptan.common.utils.TBMeanTracker(
-                    writer, 100) as tb_tracker:
+                    writer, batch_size=10) as tb_tracker:
                 while True:
-
+                    
                     for i in range(BATCH_SIZE):
                         if train_queue.empty():
                             break
@@ -303,46 +351,51 @@ if __name__ == "__main__":
 
                         buffer.add(exp)
                         n_samples += 1
-
+                    
                     if len(buffer) < REPLAY_INITIAL:
                         continue
 
                     batch = buffer.sample(BATCH_SIZE)
-                    states_v, actions_v, rewards_v, \
-                        dones_mask, last_states_v = \
-                        unpack_batch_ddqn(batch, device)
+                    states_v, actions_v, ref_vals_v, ref_q_v = \
+                        unpack_batch_sac(
+                            batch, tgt_crt_net.target_model,
+                            twinq_net, act_net, GAMMA,
+                            SAC_ENTROPY_ALPHA, device)
 
-                    # train critic
+                    tb_tracker.track("ref_v", ref_vals_v.mean(), n_iter)
+                    tb_tracker.track("ref_q", ref_q_v.mean(), n_iter)
+
+                    # train TwinQ
+                    twinq_opt.zero_grad()
+                    q1_v, q2_v = twinq_net(states_v, actions_v)
+                    q1_loss_v = F.mse_loss(q1_v.squeeze(),
+                                        ref_q_v.detach())
+                    q2_loss_v = F.mse_loss(q2_v.squeeze(),
+                                        ref_q_v.detach())
+                    q_loss_v = q1_loss_v + q2_loss_v
+                    q_loss_v.backward()
+                    twinq_opt.step()
+                    tb_tracker.track("loss_q1", q1_loss_v, n_iter)
+                    tb_tracker.track("loss_q2", q2_loss_v, n_iter)
+
+                    # Critic
                     crt_opt.zero_grad()
-                    q_v = crt_net(states_v, actions_v)
-                    last_act_v = tgt_act_net.target_model(
-                        last_states_v)
-                    q_last_v = tgt_crt_net.target_model(
-                        last_states_v, last_act_v)
-                    q_last_v[dones_mask] = 0.0
-                    q_ref_v = rewards_v.unsqueeze(dim=-1) + \
-                        q_last_v * GAMMA
-                    critic_loss_v = F.mse_loss(
-                        q_v, q_ref_v.detach())
-                    critic_loss_v.backward()
+                    val_v = crt_net(states_v)
+                    v_loss_v = F.mse_loss(val_v.squeeze(),
+                                        ref_vals_v.detach())
+                    v_loss_v.backward()
                     crt_opt.step()
-                    tb_tracker.track("loss_critic",
-                                     critic_loss_v, n_iter)
-                    tb_tracker.track("critic_ref",
-                                     q_ref_v.mean(), n_iter)
+                    tb_tracker.track("loss_v", v_loss_v, n_iter)
 
-                    # train actor
+                    # Actor
                     act_opt.zero_grad()
-                    cur_actions_v = act_net(states_v)
-                    actor_loss_v = -crt_net(
-                        states_v, cur_actions_v)
-                    actor_loss_v = actor_loss_v.mean()
-                    actor_loss_v.backward()
+                    acts_v = act_net(states_v)
+                    q_out_v, _ = twinq_net(states_v, acts_v)
+                    act_loss = -q_out_v.mean()
+                    act_loss.backward()
                     act_opt.step()
-                    tb_tracker.track("loss_actor",
-                                     actor_loss_v, n_iter)
+                    tb_tracker.track("loss_act", act_loss, n_iter)
 
-                    tgt_act_net.alpha_sync(alpha=1 - 1e-3)
                     tgt_crt_net.alpha_sync(alpha=1 - 1e-3)
 
                     if n_iter % SAVE_FREQUENCY == 0:
@@ -354,12 +407,11 @@ if __name__ == "__main__":
                         torch.save(crt_net.state_dict(), fname)
 
                         ts = time.time()
-                        rewards, info = test_net(act_net, test_env, device=device)
-                        print("Test done in %.2f sec, reward %.3f" % (
-                            time.time() - ts, rewards))
-                        writer.add_scalar("test/rewards", rewards, n_iter)
-                        for key, value in info.items():
-                            writer.add_scalar("test/{}".format(key), value, n_iter)
+                        rewards, goals_score = test_net(act_net, test_env, device=device)
+                        print("Test done in %.2f sec, reward %.3f, goals_score %d" % (
+                            time.time() - ts, rewards, goals_score))
+                        writer.add_scalar("test_rewards", rewards, n_iter)
+                        writer.add_scalar("test_goals_score", goals_score, n_iter)
                         
                         if best_reward is None or best_reward < rewards:
                             if best_reward is not None:
@@ -369,12 +421,10 @@ if __name__ == "__main__":
                                 torch.save(act_net.state_dict(), fname)
                             best_reward = rewards
                     
-                    
                     n_iter += 1
                     
-                    
                     tb_tracker.track("sample/train ratio",
-                                     (n_samples/n_iter), n_iter)
+                                        (n_samples/n_iter), n_iter)
 
     except KeyboardInterrupt:
         print("...Finishing...")

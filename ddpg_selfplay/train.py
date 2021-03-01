@@ -18,18 +18,22 @@ import rc_gym
 
 from experience import ExperienceSourceFirstLast
 
+import tracemalloc
+tracemalloc.start()
+
+
 ENV = 'VSS1v1SelfPlay-v0'
-PROCESSES_COUNT = 3
+PROCESSES_COUNT = 2
 LEARNING_RATE = 0.0001
 LEARNING_RATE_ACT = 0.0001
-REPLAY_SIZE = 2000000
+REPLAY_SIZE = 1000000
 # REPLAY_INITIAL = 100000
 REPLAY_INITIAL = 100000
 CRITIC_INITIAL = 100000
 BATCH_SIZE = 256
 GAMMA = 0.95
 REWARD_STEPS = 2
-SAVE_FREQUENCY = 100000
+SAVE_FREQUENCY = 50000
 # Q_SIZE = 1
 
 
@@ -197,7 +201,7 @@ def unpack_batch_ddqn(batch, device="cpu"):
     dones_t = torch.BoolTensor(dones).to(device)
     return states_v, actions_v, rewards_v, dones_t, last_states_v
 
-def test_net(net_1, net_2, env, count=5, device="cpu"):
+def test_net(net_1, net_2, env, count=1, device="cpu"):
     rewards = 0.0
     steps = 0
     for _ in range(count):
@@ -213,11 +217,12 @@ def test_net(net_1, net_2, env, count=5, device="cpu"):
             action = mu_v.squeeze(dim=0).data.cpu().numpy()
             action_2 = np.clip(action, -1, 1)
 
-            obs, reward, done, _ = env.step([action_1, action_2])
-
-            rewards += reward[0]
+            obs, reward, done, extra = env.step([action_1, action_2])
+            env.env.render()
+            # rewards += reward[0]
             steps += 1
             if done[0]:
+                rewards += extra[0]['goal_score']
                 break
     return rewards / count, steps / count
 
@@ -250,11 +255,13 @@ if __name__ == "__main__":
 
 
     act_net = DDPGActor(40,2).to(device)
+    # act_net.load_state_dict(torch.load('/home/felipe/Documents/rl-agents-pytorch/ddpg_selfplay/saves/ddpg-self_play_rwshaping_v2ms_a1_27/model_act_latest'))
     init_net = DDPGActor(40,2).to(device)
     if args.model:
         init_net.load_state_dict(torch.load(args.model))
     act_net.share_memory()
     crt_net = DDPGCritic(40,2).to(device)
+    # crt_net.load_state_dict(torch.load('/home/felipe/Documents/rl-agents-pytorch/ddpg_selfplay/saves/ddpg-self_play_rwshaping_v2ms_a1_27/model_crt_latest'))
 
 
     # Playing
@@ -281,7 +288,10 @@ if __name__ == "__main__":
     finish_event = mp.Event()
     test_env = gym.make(ENV)
     best_reward = None
-    
+    last_gpu_alloc = torch.cuda.memory_allocated(device=device)
+    last_gpu_reserved = torch.cuda.memory_reserved(device=device)
+
+    snapshot1 = tracemalloc.take_snapshot()
     try:
         with ptan.common.utils.RewardTracker(writer) as tracker:
             with ptan.common.utils.TBMeanTracker(
@@ -295,11 +305,11 @@ if __name__ == "__main__":
 
                         if isinstance(exp, TotalReward):
                             tracker.reward(exp.reward, n_samples)
-                            tb_tracker.track("move", exp.move, n_samples)
-                            tb_tracker.track("energy", exp.energy, n_samples)
-                            tb_tracker.track("goals", exp.goals, n_samples)
-                            tb_tracker.track("goal_score", exp.goal_score, n_samples)
-                            tb_tracker.track("ball_grad", exp.ball_grad, n_samples)
+                            writer.add_scalar("shaping/move", exp.move, n_samples)
+                            writer.add_scalar("shaping/energy", exp.energy, n_samples)
+                            writer.add_scalar("shaping/goals", exp.goals, n_samples)
+                            writer.add_scalar("shaping/goal_score", exp.goal_score, n_samples)
+                            # writer.add_scalar("shaping/ball_grad", exp.ball_grad, n_samples)
                             continue
 
                         buffer.add(exp)
@@ -358,7 +368,7 @@ if __name__ == "__main__":
                         rewards, steps = test_net(act_net, init_net, test_env, device=device)
                         print("Test done in %.2f sec, reward %.3f, steps %d" % (
                             time.time() - ts, rewards, steps))
-                        writer.add_scalar("test_reward", rewards, n_iter)
+                        writer.add_scalar("test_goal_score", rewards, n_iter)
                         if best_reward is None or best_reward < rewards:
                             if best_reward is not None:
                                 print("Best reward updated: %.3f -> %.3f" % (best_reward, rewards))
@@ -366,7 +376,22 @@ if __name__ == "__main__":
                                 fname = os.path.join(save_path, "model_act_best")
                                 torch.save(act_net.state_dict(), fname)
                             best_reward = rewards
-                    
+                                            
+                        # ... call the function leaking memory ...
+                        snapshot2 = tracemalloc.take_snapshot()
+
+                        top_stats = snapshot2.compare_to(snapshot1, 'lineno')
+
+                        print("[ Top 10 differences ]")
+                        for stat in top_stats[:10]:
+                            print(stat)
+                            
+                        print("memory allocated delta: ",torch.cuda.memory_allocated(device=device) - last_gpu_alloc)
+                        print("memory reserved delta: ",torch.cuda.memory_reserved(device=device) -last_gpu_reserved)
+                        snapshot1 = snapshot2
+                        last_gpu_alloc = torch.cuda.memory_allocated(device=device)
+                        last_gpu_reserved = torch.cuda.memory_reserved(device=device)
+
                     n_iter += 1
 
                     tb_tracker.track("sample/train ratio",

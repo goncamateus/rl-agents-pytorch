@@ -73,6 +73,7 @@ if __name__ == "__main__":
         mu_v = net(obs_v)
         action = mu_v.squeeze(dim=0).data.numpy()
         action = np.clip(action, -1, 1)
+        action[1][0], action[1][1] = 0., 0.
         obs, reward, done, _ = env.step(action)
         env.render('human')
         total_reward += reward

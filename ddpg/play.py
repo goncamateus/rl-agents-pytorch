@@ -1,6 +1,7 @@
 import os
 import argparse
 import collections
+import sys
 
 import gym
 import ptan
@@ -16,7 +17,7 @@ from tensorboardX import SummaryWriter
 
 import rc_gym
 
-ENV = 'VSSDetGkDef-v0'
+ENV = 'VSSDetGkDefTest-v0'
 PROCESSES_COUNT = 3
 LEARNING_RATE = 0.0001
 REPLAY_SIZE = 2000000
@@ -45,6 +46,8 @@ class DDPGActor(nn.Module):
         return self.net(x)
 
 
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-m", "--model", required=True, help="Model file to load")
@@ -53,7 +56,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     env = gym.make(args.env)
-
     net = DDPGActor(env.observation_space.shape[0], env.action_space.shape[0])
     net.load_state_dict(torch.load(args.model))
 
