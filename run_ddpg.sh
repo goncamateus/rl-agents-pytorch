@@ -1,4 +1,4 @@
 #!/bin/bash
-for i in 0 1 2 3 4; do
-  python train_ddpg.py --cuda -n "DDPG_SSLGoToBall-v0_0$i" -e SSLGoToBall-v0
+for i in 0; do
+  python train_ddpg.py --cuda -n "DDPG_Strat-1" -e VSSStrat-v0
 done
