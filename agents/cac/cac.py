@@ -144,10 +144,9 @@ class CAC:
 
     def train(self, batch):
         metrics = {}
-        alphas = torch.Tensor([0.5, 0.48732, 0.00713, 0.00509]).to(self.device)
         S_v = batch[0]
         A_v = batch[1]
-        r_v = batch[2]*alphas*100
+        r_v = batch[2]*100
         S_next_v = batch[3]
         dones = batch[4]
         A_council_v = batch[5]
@@ -159,7 +158,7 @@ class CAC:
             A_next = self.tgt_council_pi[i](S_next_v)
             Q_next = self.tgt_council_Q[i](S_next_v, A_next)
             Q_next[dones == 1.0] = 0.0
-            Q_next = r_v[:, i].unsqueeze(1) + self.hp.GAMMA * Q_next
+            Q_next = r_v[:, i].unsqueeze(1) + self.gamma * Q_next
             Q_next = Q_next.detach()
             self.Q_council_opt[i].zero_grad()
             Q_council_loss = F.mse_loss(Qs, Q_next)
@@ -181,11 +180,11 @@ class CAC:
         # Train Critic
         Qs = self.Q(S_v, A_v)
         council_actions = [actor(S_next_v) for actor in self.pi_council]
-        council_actions = torch.cat(council_actions, dim=1)
-        A_next = self.tgt_pi(council_actions)
+        council_actions_v = torch.cat(council_actions, dim=1)
+        A_next = self.tgt_pi(council_actions_v)
         Q_next = self.tgt_Q(S_next_v, A_next)
-        for council in self.Q_council:
-            Q_next += council(S_next_v, A_next)
+        for i, council in enumerate(self.Q_council):
+            Q_next += council(S_next_v, council_actions[i])
         Q_next[dones == 1.0] = 0.0
         Q_next = r_v.sum(dim=1).unsqueeze(1) + self.gamma * Q_next
         Q_next = Q_next.detach()
