@@ -1,9 +1,10 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Generator, Optional, Union, Tuple, NamedTuple
+from typing import Dict, Generator, List, Optional, Union, Tuple, NamedTuple
 
 import numpy as np
 import torch as th
 from gym import spaces
+
 
 def get_action_dim(action_space: spaces.Space) -> int:
     """
@@ -25,6 +26,7 @@ def get_action_dim(action_space: spaces.Space) -> int:
     else:
         raise NotImplementedError(f"{action_space} action space is not supported")
 
+
 def get_obs_shape(observation_space: spaces.Space) -> Tuple[int, ...]:
     """
     Get the shape of the observation (useful for the buffers).
@@ -43,7 +45,10 @@ def get_obs_shape(observation_space: spaces.Space) -> Tuple[int, ...]:
         # Number of binary features
         return (int(observation_space.n),)
     else:
-        raise NotImplementedError(f"{observation_space} observation space is not supported")
+        raise NotImplementedError(
+            f"{observation_space} observation space is not supported"
+        )
+
 
 class ReplayBufferSamples(NamedTuple):
     observations: th.Tensor
@@ -51,6 +56,7 @@ class ReplayBufferSamples(NamedTuple):
     next_observations: th.Tensor
     dones: th.Tensor
     rewards: th.Tensor
+
 
 class BaseBuffer(ABC):
     """
@@ -119,8 +125,7 @@ class BaseBuffer(ABC):
         return self._get_samples(batch_inds)
 
     @abstractmethod
-    def _get_samples(
-        self, batch_inds: np.ndarray) -> Union[ReplayBufferSamples]:
+    def _get_samples(self, batch_inds: np.ndarray) -> Union[ReplayBufferSamples]:
         """
         :param batch_inds:
         :return:
@@ -139,6 +144,7 @@ class BaseBuffer(ABC):
         if copy:
             return th.tensor(array).to(self.device)
         return th.as_tensor(array).to(self.device)
+
 
 class ReplayBuffer(BaseBuffer):
     """
@@ -164,18 +170,34 @@ class ReplayBuffer(BaseBuffer):
         n_envs: int = 1,
         n_rew: int = 1,
     ):
-        super(ReplayBuffer, self).__init__(buffer_size, observation_space, action_space, device, n_envs=n_envs)
+        super(ReplayBuffer, self).__init__(
+            buffer_size, observation_space, action_space, device, n_envs=n_envs
+        )
 
         assert n_envs == 1, "Replay buffer only support single environment for now"
 
-        self.observations = np.zeros((self.buffer_size, self.n_envs) + self.obs_shape, dtype=observation_space.dtype)
-        self.next_observations = np.zeros((self.buffer_size, self.n_envs) + self.obs_shape, dtype=observation_space.dtype)
-        self.actions = np.zeros((self.buffer_size, self.n_envs, self.action_dim), dtype=action_space.dtype)
+        self.observations = np.zeros(
+            (self.buffer_size, self.n_envs) + self.obs_shape,
+            dtype=observation_space.dtype,
+        )
+        self.next_observations = np.zeros(
+            (self.buffer_size, self.n_envs) + self.obs_shape,
+            dtype=observation_space.dtype,
+        )
+        self.actions = np.zeros(
+            (self.buffer_size, self.n_envs, self.action_dim), dtype=action_space.dtype
+        )
         self.rewards = np.zeros((self.buffer_size, n_rew), dtype=np.float32)
         self.dones = np.zeros((self.buffer_size,), dtype=np.float32)
 
-
-    def add(self, obs: np.ndarray, next_obs: np.ndarray, action: np.ndarray, reward: np.ndarray, done: np.ndarray) -> None:
+    def add(
+        self,
+        obs: np.ndarray,
+        next_obs: np.ndarray,
+        action: np.ndarray,
+        reward: np.ndarray,
+        done: np.ndarray,
+    ) -> None:
         # Copy to avoid modification by reference
         self.observations[self.pos] = np.array(obs).copy()
         self.next_observations[self.pos] = np.array(next_obs).copy()
@@ -196,5 +218,90 @@ class ReplayBuffer(BaseBuffer):
             self.dones[batch_inds],
             self.rewards[batch_inds],
         )
-        
+
         return ReplayBufferSamples(*tuple(map(self.to_torch, data)))
+
+
+class CACBufferSamples(NamedTuple):
+    observations: th.Tensor
+    actions: th.Tensor
+    next_observations: th.Tensor
+    dones: th.Tensor
+    rewards: th.Tensor
+    council_actions: List[th.Tensor]
+
+
+class CACBuffer(BaseBuffer):
+    def __init__(
+        self,
+        buffer_size: int,
+        observation_space: spaces.Space,
+        action_space: spaces.Space,
+        device: Union[th.device, str] = "cpu",
+        n_rew: int = 1,
+    ):
+        super(CACBuffer, self).__init__(
+            buffer_size, observation_space, action_space, device, n_envs=1
+        )
+        self.n_rew = n_rew
+
+        self.observations = np.zeros(
+            (self.buffer_size, self.n_envs) + self.obs_shape,
+            dtype=observation_space.dtype,
+        )
+        self.next_observations = np.zeros(
+            (self.buffer_size, self.n_envs) + self.obs_shape,
+            dtype=observation_space.dtype,
+        )
+        self.actions = np.zeros(
+            (self.buffer_size, self.n_envs, self.action_dim), dtype=action_space.dtype
+        )
+        self.councils_actions = []
+        for _ in range(self.n_rew - 1):
+            self.councils_actions.append(
+                np.zeros(
+                    (self.buffer_size, self.action_dim), dtype=action_space.dtype
+                )
+            )
+        self.rewards = np.zeros((self.buffer_size, n_rew), dtype=np.float32)
+        self.dones = np.zeros((self.buffer_size,), dtype=np.float32)
+
+    def add(
+        self,
+        obs: np.ndarray,
+        next_obs: np.ndarray,
+        action: np.ndarray,
+        councils_action: List[np.ndarray],
+        reward: np.ndarray,
+        done: np.ndarray,
+    ) -> None:
+        # Copy to avoid modification by reference
+        self.observations[self.pos] = np.array(obs).copy()
+        self.next_observations[self.pos] = np.array(next_obs).copy()
+        self.actions[self.pos] = np.array(action).copy()
+        for i in range(self.n_rew - 1):
+            self.councils_actions[i][self.pos] = np.array(councils_action[i]).copy()
+        self.rewards[self.pos] = np.array(reward).copy()
+        self.dones[self.pos] = np.array(done).copy()
+
+        self.pos += 1
+        if self.pos == self.buffer_size:
+            self.full = True
+            self.pos = 0
+
+    def _get_samples(self, batch_inds: np.ndarray) -> List:
+        data = [
+            self.observations[batch_inds, 0, :],
+            self.actions[batch_inds, 0, :],
+            self.rewards[batch_inds],
+            self.next_observations[batch_inds, 0, :],
+            self.dones[batch_inds],
+        ]
+        
+        data = list(map(self.to_torch, data))
+        councils_data = []
+        for i in range(self.n_rew - 1):
+            council = self.to_torch(self.councils_actions[i][batch_inds])
+            councils_data.append(council)
+        data.append(councils_data)
+        return data

@@ -4,6 +4,8 @@ import numpy as np
 
 ExperienceFirstLast = namedtuple(
     'ExperienceFirstLast', ('state', 'action', 'reward', 'last_state'))
+ExperienceFirstLastCAC = namedtuple(
+    'ExperienceFirstLastCAC', ('state', 'action', 'council', 'reward', 'last_state'))
 Experience = namedtuple('Experience', ['state', 'action', 'reward', 'done'])
 
 # based on coax and ptan
