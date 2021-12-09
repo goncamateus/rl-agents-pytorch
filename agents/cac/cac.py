@@ -144,6 +144,8 @@ class CAC:
 
     def train(self, batch):
         metrics = {}
+        alphas = torch.Tensor([0.5, 0.49445, 0.00555]).to(self.device)
+        gammas = [0.9, 0.99]
         S_v = batch[0]
         A_v = batch[1]
         r_v = batch[2]*100
@@ -158,7 +160,7 @@ class CAC:
             A_next = self.tgt_council_pi[i](S_next_v)
             Q_next = self.tgt_council_Q[i](S_next_v, A_next)
             Q_next[dones == 1.0] = 0.0
-            Q_next = r_v[:, i].unsqueeze(1) + self.gamma * Q_next
+            Q_next = r_v[:, i].unsqueeze(1) + gammas[i] * Q_next
             Q_next = Q_next.detach()
             self.Q_council_opt[i].zero_grad()
             Q_council_loss = F.mse_loss(Qs, Q_next)
@@ -186,7 +188,7 @@ class CAC:
         for i, council in enumerate(self.Q_council):
             Q_next += council(S_next_v, council_actions[i])
         Q_next[dones == 1.0] = 0.0
-        Q_next = r_v.sum(dim=1).unsqueeze(1) + self.gamma * Q_next
+        Q_next = (r_v*alphas).sum(dim=1).unsqueeze(1) + self.gamma * Q_next
         Q_next = Q_next.detach()
         self.Q_opt.zero_grad()
         Q_loss = F.mse_loss(Qs, Q_next)
