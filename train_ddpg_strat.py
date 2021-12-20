@@ -55,7 +55,7 @@ if __name__ == "__main__":
         ENV_NAME=args.env,
         N_ROLLOUT_PROCESSES=3,
         LEARNING_RATE=0.0001,
-        EXP_GRAD_RATIO=30,
+        EXP_GRAD_RATIO=20,
         BATCH_SIZE=256,
         GAMMA=0.95,
         REWARD_STEPS=1,
@@ -115,9 +115,8 @@ if __name__ == "__main__":
     best_reward = None
     last_gif = None
 
-
     try:
-        alphas = torch.Tensor([0.5, 0.48732, 0.00713, 0.00509]).to(device)
+        alphas = torch.Tensor([0.6600, 0.3200, 0.0053, 0.0080]).to(device)
         while n_grads < hp.TOTAL_GRAD_STEPS:
             metrics = {}
             ep_infos = list()
@@ -164,7 +163,6 @@ if __name__ == "__main__":
             r_v = batch.rewards
             dones = batch.dones
             S_next_v = batch.next_observations
-            r_v *= 100
             r_strat = r_v.clone()
             r_v = (r_v * alphas).sum(dim=1).unsqueeze(1)
             # train critic
@@ -191,22 +189,30 @@ if __name__ == "__main__":
             metrics["train/loss_Q_strat"] = Q_strat_loss_v.cpu().detach().numpy()
             Q_strat_loss_v.backward()
             Q_strat_opt.step()
+            Q_comp = (Q_strat_v * alphas).sum(1)
+            metrics["train/Q_diff(strat-normal)"] = (
+                (Q_comp.mean() - Q_v.mean()).cpu().detach().numpy()
+            )
 
             for i in range(hp.N_REWARDS):
                 component_loss = F.mse_loss(
                     Q_strat_v[:, i], Q_strat_ref_v[:, i].detach()
                 )
-                metrics["train/loss_Q_component_" + str(i)] = component_loss.cpu().detach().numpy()
+                metrics["train/loss_Q_component_" + str(i)] = (
+                    component_loss.cpu().detach().numpy()
+                )
 
             # train actor - Maximize Q value received over every S
             A_cur_v = pi(S_v)
             pi_opt.zero_grad()
             Q_values_strat = Q_strat(S_v, A_cur_v)
-            pi_loss_strat_v = (Q_values_strat * alphas).sum(1)
-            pi_loss_strat_v = -pi_loss_strat_v.mean()
-            pi_loss_strat_v.backward()
+            pi_loss = (Q_values_strat * alphas).sum(1)
+            pi_loss = -pi_loss.mean()
+            # Q_values = Q(S_v, A_cur_v)
+            # pi_loss = -Q_values.mean()
+            pi_loss.backward()
             pi_opt.step()
-            metrics["train/loss_pi"] = pi_loss_strat_v.cpu().detach().numpy()
+            metrics["train/loss_pi"] = pi_loss.cpu().detach().numpy()
             # Sync target networks
             tgt_pi.sync(alpha=1 - 1e-3)
             tgt_Q.sync(alpha=1 - 1e-3)

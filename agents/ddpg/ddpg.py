@@ -95,7 +95,7 @@ def data_func(pi, device, queue_m, finish_event_m, sigma_m, gif_req_m, hp):
                     kwargs = {
                         "state": s,
                         "action": a,
-                        "reward": r,
+                        "reward": r*100,
                         "last_state": s_next,
                     }
                     exp = ExperienceFirstLast(**kwargs)
