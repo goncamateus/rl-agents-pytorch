@@ -69,7 +69,7 @@ if __name__ == "__main__":
         REPLAY_INITIAL=100000,
         SAVE_FREQUENCY=100000,
         GIF_FREQUENCY=50000,
-        TOTAL_GRAD_STEPS=1000000,
+        TOTAL_GRAD_STEPS=505000,
     )
     wandb.init(
         project="reward_alphas", name=hp.EXP_NAME, entity="robocin", config=hp.to_dict()
