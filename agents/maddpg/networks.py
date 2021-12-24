@@ -1,58 +1,39 @@
-import torch
-import torch.nn as nn
+import torch 
+from torch.nn import functional as F
+from torch import nn
 import copy
 
-
-class DDPGActor(nn.Module):
+class Actor(nn.Module):
     def __init__(self, obs_size, act_size):
-        super(DDPGActor, self).__init__()
+        super(Actor, self).__init__()
 
         self.net = nn.Sequential(
-            nn.Linear(obs_size, 256),
+            nn.Linear(obs_size, 64),
             nn.ReLU(),
-            nn.Linear(256, 256),
+            nn.Linear(64, 64),
             nn.ReLU(),
-            nn.Linear(256, 512),
-            nn.ReLU(),
-            nn.Linear(512, 512),
-            nn.ReLU(),
-            nn.Linear(512, 256),
-            nn.ReLU(),
-            nn.Linear(256, act_size),
-            nn.Tanh(),
+            nn.Linear(64, act_size)
         )
 
     def forward(self, x):
         return self.net(x)
-
-    def get_action(self, x):
-        return self.net(x).detach().cpu().numpy()
+    
 
 
-class DDPGCritic(nn.Module):
-    def __init__(self, obs_size, act_size, n_out=1):
-        super(DDPGCritic, self).__init__()
+class Critic(nn.Module):
+    def __init__(self, obs_size, act_size):
+        super(Critic, self).__init__()
 
-        self.obs_net = nn.Sequential(
-            nn.Linear(obs_size, 512),
+        self.net = nn.Sequential(
+            nn.Linear(obs_size + act_size, 64),
             nn.ReLU(),
-            nn.Linear(512, 512),
+            nn.Linear(64, 64),
             nn.ReLU(),
-            nn.Linear(512, 1024),
-            nn.ReLU(),
-        )
-
-        self.out_net = nn.Sequential(
-            nn.Linear(1024 + act_size, 512),
-            nn.ReLU(),
-            nn.Linear(512, 512),
-            nn.ReLU(),
-            nn.Linear(512, n_out),
+            nn.Linear(64, 1)
         )
 
     def forward(self, x, a):
-        obs = self.obs_net(x)
-        return self.out_net(torch.cat([obs, a], dim=1))
+        return self.net(torch.cat([x, a], dim=1))
 
 
 class TargetNet:

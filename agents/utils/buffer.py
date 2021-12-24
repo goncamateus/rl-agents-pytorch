@@ -162,6 +162,7 @@ class ReplayBuffer(BaseBuffer):
         action_space: spaces.Space,
         device: Union[th.device, str] = "cpu",
         n_envs: int = 1,
+        n_rew: int = 1,
     ):
         super(ReplayBuffer, self).__init__(buffer_size, observation_space, action_space, device, n_envs=n_envs)
 
@@ -170,8 +171,8 @@ class ReplayBuffer(BaseBuffer):
         self.observations = np.zeros((self.buffer_size, self.n_envs) + self.obs_shape, dtype=observation_space.dtype)
         self.next_observations = np.zeros((self.buffer_size, self.n_envs) + self.obs_shape, dtype=observation_space.dtype)
         self.actions = np.zeros((self.buffer_size, self.n_envs, self.action_dim), dtype=action_space.dtype)
-        self.rewards = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
-        self.dones = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.rewards = np.zeros((self.buffer_size, n_rew), dtype=np.float32)
+        self.dones = np.zeros((self.buffer_size,), dtype=np.float32)
 
 
     def add(self, obs: np.ndarray, next_obs: np.ndarray, action: np.ndarray, reward: np.ndarray, done: np.ndarray) -> None:
