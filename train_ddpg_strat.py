@@ -7,7 +7,6 @@ import time
 
 import gym
 import numpy as np
-import pyvirtualdisplay
 import rsoccer_gym
 import torch
 import torch.multiprocessing as mp
@@ -28,11 +27,12 @@ from agents.utils import (
     ReplayBuffer,
     save_checkpoint,
     unpack_batch,
+    StratLastRewards,
 )
+from agents.utils.experiment import StratFinalRewards
 
 if __name__ == "__main__":
     # Creates a virtual display for OpenAI gym
-    pyvirtualdisplay.Display(visible=0, size=(1400, 900)).start()
 
     mp.set_start_method("spawn")
     os.environ["OMP_NUM_THREADS"] = "1"
@@ -49,7 +49,7 @@ if __name__ == "__main__":
 
     # Input Experiment Hyperparameters
     hp = DDPGHP(
-        AGENT="ddpg_strat_async",
+        AGENT="ddpg_dynalphas_async",
         EXP_NAME=args.name,
         DEVICE=device,
         ENV_NAME=args.env,
@@ -59,7 +59,7 @@ if __name__ == "__main__":
         BATCH_SIZE=256,
         GAMMA=0.95,
         REWARD_STEPS=1,
-        N_REWARDS=4,
+        N_REWARDS=3,
         NOISE_SIGMA_INITIAL=0.8,
         NOISE_THETA=0.15,
         NOISE_SIGMA_DECAY=0.99,
@@ -72,7 +72,7 @@ if __name__ == "__main__":
         TOTAL_GRAD_STEPS=505000,
     )
     wandb.init(
-        project="reward_alphas", name=hp.EXP_NAME, entity="robocin", config=hp.to_dict()
+        project="mestrado", name=hp.EXP_NAME, entity="goncamateus", config=hp.to_dict()
     )
     current_time = datetime.datetime.now().strftime("%b-%d_%H-%M-%S")
     tb_path = os.path.join("runs", current_time + "_" + hp.ENV_NAME + "_" + hp.EXP_NAME)
@@ -116,7 +116,11 @@ if __name__ == "__main__":
     last_gif = None
 
     try:
-        alphas = torch.Tensor([0.6600, 0.3200, 0.0053, 0.0080]).to(device)
+        alphas = torch.Tensor([0.333, 0.333, 0.333]).to(device)
+        r_max = torch.Tensor([1.0, 1.0, 4.0]).to(device)
+        r_min = torch.Tensor([0.0, 0.0, 0.0]).to(device)
+        last_epi_rewards = StratLastRewards(10, hp.N_REWARDS)
+        rew_mean = None
         while n_grads < hp.TOTAL_GRAD_STEPS:
             metrics = {}
             ep_infos = list()
@@ -138,7 +142,7 @@ if __name__ == "__main__":
                     }
                     ep_infos.append(logs)
                     n_episodes += 1
-                else:
+                elif isinstance(safe_exp, ExperienceFirstLast):
                     buffer.add(
                         obs=safe_exp.state,
                         next_obs=safe_exp.last_state
@@ -149,6 +153,10 @@ if __name__ == "__main__":
                         done=False if safe_exp.last_state is not None else True,
                     )
                     new_samples += 1
+                elif isinstance(safe_exp, StratFinalRewards):
+                    last_epi_rewards.add(safe_exp)
+                else:
+                    raise Exception("Unknown type of experience")
             n_samples += new_samples
             sample_time = time.perf_counter()
 
@@ -194,6 +202,16 @@ if __name__ == "__main__":
                 (Q_comp.mean() - Q_v.mean()).cpu().detach().numpy()
             )
 
+            if last_epi_rewards.can_do():
+                last_rew = torch.Tensor(last_epi_rewards.mean()).to(hp.DEVICE)
+                if rew_mean is None:
+                    rew_mean = last_rew
+                else:
+                    rew_mean = rew_mean + 1e-5 * (last_rew - rew_mean)
+                dQ = torch.clamp((r_max - rew_mean) / (r_max - r_min), 0, 1)
+                expdQ = torch.exp(dQ) - 1
+                alphas = expdQ / (torch.sum(expdQ, 0) + 1e-4)
+
             for i in range(hp.N_REWARDS):
                 component_loss = F.mse_loss(
                     Q_strat_v[:, i], Q_strat_ref_v[:, i].detach()
@@ -201,6 +219,7 @@ if __name__ == "__main__":
                 metrics["train/loss_Q_component_" + str(i)] = (
                     component_loss.cpu().detach().numpy()
                 )
+                metrics["train/Alpha_" + str(i)] = alphas[i].cpu().detach().numpy()
 
             # train actor - Maximize Q value received over every S
             A_cur_v = pi(S_v)

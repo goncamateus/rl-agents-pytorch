@@ -10,6 +10,7 @@ from agents.utils import (
     generate_gif,
     HyperParameters,
     ExperienceFirstLast,
+    StratFinalRewards,
 )
 import os
 from dataclasses import dataclass
@@ -52,6 +53,7 @@ def data_func(pi, device, queue_m, finish_event_m, sigma_m, gif_req_m, hp):
             noise.reset()
             noise.sigma = sigma_m.value
             info = {}
+            strat_total_rewards = np.zeros(hp.N_REWARDS)
             ep_steps = 0
             if hp.MULTI_AGENT:
                 ep_rw = [0] * hp.N_AGENTS
@@ -64,7 +66,7 @@ def data_func(pi, device, queue_m, finish_event_m, sigma_m, gif_req_m, hp):
                 a_v = pi(s_v)
                 a = a_v.cpu().numpy()
                 a = noise(a)
-                s_next, r, done, info = env.step(a)     
+                s_next, r, done, info = env.step(a)
                 ep_steps += 1
                 if hp.MULTI_AGENT:
                     for i in range(hp.N_AGENTS):
@@ -72,6 +74,7 @@ def data_func(pi, device, queue_m, finish_event_m, sigma_m, gif_req_m, hp):
                 else:
                     if hp.N_REWARDS > 1:
                         ep_rw += r.sum()
+                        strat_total_rewards += r
                     else:
                         ep_rw += r
 
@@ -95,7 +98,7 @@ def data_func(pi, device, queue_m, finish_event_m, sigma_m, gif_req_m, hp):
                     kwargs = {
                         "state": s,
                         "action": a,
-                        "reward": r*100,
+                        "reward": r * 100,
                         "last_state": s_next,
                     }
                     exp = ExperienceFirstLast(**kwargs)
@@ -106,7 +109,9 @@ def data_func(pi, device, queue_m, finish_event_m, sigma_m, gif_req_m, hp):
 
                 # Set state for next step
                 s = s_next
-
+            if hp.N_REWARDS > 1:
+                strat_rews = StratFinalRewards(*tuple(strat_total_rewards))
+                queue_m.put(strat_rews)
             info["fps"] = ep_steps / (time.perf_counter() - st_time)
             info["noise"] = noise.sigma
             info["ep_steps"] = ep_steps
