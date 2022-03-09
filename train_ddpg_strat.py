@@ -59,7 +59,7 @@ if __name__ == "__main__":
         BATCH_SIZE=256,
         GAMMA=0.95,
         REWARD_STEPS=1,
-        N_REWARDS=3,
+        N_REWARDS=4,
         NOISE_SIGMA_INITIAL=0.8,
         NOISE_THETA=0.15,
         NOISE_SIGMA_DECAY=0.99,
@@ -116,10 +116,10 @@ if __name__ == "__main__":
     last_gif = None
 
     try:
-        alphas = torch.Tensor([0.333, 0.333, 0.333]).to(device)
-        r_max = torch.Tensor([1.0, 1.0, 4.0]).to(device)
-        r_min = torch.Tensor([0.0, 0.0, 0.0]).to(device)
-        last_epi_rewards = StratLastRewards(10, hp.N_REWARDS)
+        alphas = torch.ones(hp.N_REWARDS).to(device)/hp.N_REWARDS
+        r_max = torch.Tensor([1.0, 1.0, -1.5, 1.0]).to(device)
+        r_min = torch.Tensor([0.0, 0.0, -2.0, 0.0]).to(device)
+        last_epi_rewards = StratLastRewards(50, hp.N_REWARDS) 
         rew_mean = None
         while n_grads < hp.TOTAL_GRAD_STEPS:
             metrics = {}
@@ -202,12 +202,14 @@ if __name__ == "__main__":
                 (Q_comp.mean() - Q_v.mean()).cpu().detach().numpy()
             )
 
+            # Alpha automatic adjustment
+            rew_tau = 0.995
             if last_epi_rewards.can_do():
-                last_rew = torch.Tensor(last_epi_rewards.mean()).to(hp.DEVICE)
+                rew_mean_t = torch.Tensor(last_epi_rewards.mean()).to(hp.DEVICE)
                 if rew_mean is None:
-                    rew_mean = last_rew
+                    rew_mean = rew_mean_t
                 else:
-                    rew_mean = rew_mean + 1e-5 * (last_rew - rew_mean)
+                    rew_mean = rew_mean_t + (rew_mean - rew_mean_t) * rew_tau
                 dQ = torch.clamp((r_max - rew_mean) / (r_max - r_min), 0, 1)
                 expdQ = torch.exp(dQ) - 1
                 alphas = expdQ / (torch.sum(expdQ, 0) + 1e-4)

@@ -9,7 +9,7 @@ import rsoccer_gym
 import torch
 
 StratFinalRewards = namedtuple(
-    "StratFinalRewards", ["gate1", "gate2", "gate3"]
+    "StratFinalRewards", ["move", "ball_grad", "energy", "goal"]
 )
 
 
