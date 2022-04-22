@@ -4,7 +4,6 @@ from collections import namedtuple
 
 import gym
 import numpy as np
-import pybullet_envs
 import rsoccer_gym
 import torch
 

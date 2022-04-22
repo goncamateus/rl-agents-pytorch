@@ -117,9 +117,9 @@ if __name__ == "__main__":
 
     try:
         alphas = torch.ones(hp.N_REWARDS).to(device)/hp.N_REWARDS
-        r_max = torch.Tensor([1.0, 1.0, -1.5, 1.0]).to(device)
+        r_max = torch.Tensor([0.5, 1.0, -1.0, 1.0]).to(device)
         r_min = torch.Tensor([0.0, 0.0, -2.0, 0.0]).to(device)
-        last_epi_rewards = StratLastRewards(50, hp.N_REWARDS) 
+        last_epi_rewards = StratLastRewards(10, hp.N_REWARDS) 
         rew_mean = None
         while n_grads < hp.TOTAL_GRAD_STEPS:
             metrics = {}
@@ -203,7 +203,7 @@ if __name__ == "__main__":
             )
 
             # Alpha automatic adjustment
-            rew_tau = 0.995
+            rew_tau = 0
             if last_epi_rewards.can_do():
                 rew_mean_t = torch.Tensor(last_epi_rewards.mean()).to(hp.DEVICE)
                 if rew_mean is None:
