@@ -2,3 +2,6 @@ saves/
 runs/
 __pycache__/
 .vscode/
+wandb/
+*.pth
+*.pt

@@ -7,7 +7,7 @@ import time
 
 import gym
 import numpy as np
-import rc_gym
+import rsoccer_gym
 import torch.multiprocessing as mp
 import torch.nn.functional as F
 import torch.optim as optim
@@ -32,9 +32,9 @@ if __name__ == "__main__":
     # Input Experiment Hyperparameters
     hp = HyperParameters(
         EXP_NAME=args.name,
-        ENV_NAME='SSLGoToBall-v0',
+        ENV_NAME='VSSGoTo-v0',
         AGENT="ddpg_async",
-        N_ROLLOUT_PROCESSES=1,
+        N_ROLLOUT_PROCESSES=4,
         LEARNING_RATE=0.0001,
         REPLAY_SIZE=1000000,
         REPLAY_INITIAL=10000,
@@ -42,10 +42,10 @@ if __name__ == "__main__":
         SAVE_FREQUENCY=1000,
         BATCH_SIZE=256,
         GAMMA=0.95,
-        REWARD_STEPS=2,
+        REWARD_STEPS=1,
         NOISE_SIGMA_INITIAL=1.0,
         NOISE_THETA=0.15,
-        NOISE_SIGMA_DECAY=0.99,
+        NOISE_SIGMA_DECAY=0.95,
         NOISE_SIGMA_GRAD_STEPS=20000,
         GIF_FREQUENCY=20000
     )

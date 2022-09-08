@@ -1,13 +1,14 @@
 from dataclasses import dataclass
 
 import gym
-import rc_gym
+import numpy as np
 import torch
 
 
 @dataclass
 class HyperParameters:
     """Class containing all experiment hyperparameters"""
+
     EXP_NAME: str
     ENV_NAME: str
     AGENT: str
@@ -31,11 +32,8 @@ def get_env_specs(env_name):
     return env.observation_space.shape[0], env.action_space.shape[0]
 
 
-def unpack_batch(
-    batch,
-    device="cpu"
-):
-    '''From a batch of experience, return values in Tensor form on device'''
+def unpack_batch(batch, device="cpu"):
+    """From a batch of experience, return values in Tensor form on device"""
     states, actions, rewards, dones, last_states = [], [], [], [], []
     for exp in batch:
         states.append(exp.state)
@@ -46,9 +44,9 @@ def unpack_batch(
             last_states.append(exp.state)
         else:
             last_states.append(exp.last_state)
-    states_v = torch.Tensor(states).to(device)
-    actions_v = torch.Tensor(actions).to(device)
-    rewards_v = torch.Tensor(rewards).to(device)
-    last_states_v = torch.Tensor(last_states).to(device)
-    dones_t = torch.BoolTensor(dones).to(device)
+    states_v = torch.Tensor(np.array(states)).to(device)
+    actions_v = torch.Tensor(np.array(actions)).to(device)
+    rewards_v = torch.Tensor(np.array(rewards)).to(device)
+    last_states_v = torch.Tensor(np.array(last_states)).to(device)
+    dones_t = torch.BoolTensor(np.array(dones)).to(device)
     return states_v, actions_v, rewards_v, dones_t, last_states_v

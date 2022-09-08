@@ -151,10 +151,10 @@ def loss_sac(alpha, gamma, batch, crt_net, act_net,
     state_batch, action_batch, reward_batch,\
         mask_batch, next_state_batch = unpack_batch(batch)
 
-    state_batch = torch.tensor(state_batch, dtype=torch.float32)
-    next_state_batch = torch.tensor(next_state_batch, dtype=torch.float32)
-    action_batch = torch.tensor(action_batch, dtype=torch.float32)
-    reward_batch = torch.tensor(reward_batch, dtype=torch.float32).unsqueeze(1)
+    state_batch = state_batch.clone().detach()
+    next_state_batch = next_state_batch.clone().detach()
+    action_batch = action_batch.clone().detach()
+    reward_batch = reward_batch.clone().detach().unsqueeze(1)
     mask_batch = torch.BoolTensor(mask_batch)
 
     if cuda:

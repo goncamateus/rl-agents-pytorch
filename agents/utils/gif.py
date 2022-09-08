@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-import PIL
+from PIL import Image
 import os
 
 def generate_gif(
@@ -33,8 +33,8 @@ def generate_gif(
         s_next, r, done, info = env.step(a)
         # store frame
         frame = env.render(mode='rgb_array')
-        frame = PIL.Image.fromarray(frame)
-        frame = frame.convert('P', palette=PIL.Image.ADAPTIVE)
+        frame = Image.fromarray(frame)
+        frame = frame.convert('P', palette=Image.ADAPTIVE)
         if resize_to is not None:
             if not (isinstance(resize_to, tuple) and len(resize_to) == 2):
                 raise TypeError(
@@ -50,8 +50,8 @@ def generate_gif(
 
     # store last frame
     frame = env.render(mode='rgb_array')
-    frame = PIL.Image.fromarray(frame)
-    frame = frame.convert('P', palette=PIL.Image.ADAPTIVE)
+    frame = Image.fromarray(frame)
+    frame = frame.convert('P', palette=Image.ADAPTIVE)
     if resize_to is not None:
         frame = frame.resize(resize_to)
     frames.append(frame)

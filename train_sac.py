@@ -6,7 +6,6 @@ import os
 import time
 
 import gym
-import rc_gym
 import torch
 import torch.multiprocessing as mp
 import torch.nn.functional as F
@@ -39,15 +38,15 @@ if __name__ == "__main__":
         ENV_NAME=args.env,
         AGENT="sac_async",
         N_ROLLOUT_PROCESSES=args.num_processes,
-        LEARNING_RATE=0.0001,
+        LEARNING_RATE=3e-4,
         REPLAY_SIZE=1000000,
         REPLAY_INITIAL=10000,
-        EXP_GRAD_RATIO=10,
-        SAVE_FREQUENCY=1000,
+        EXP_GRAD_RATIO=2,
+        SAVE_FREQUENCY=10000,
         BATCH_SIZE=256,
-        GAMMA=0.95,
-        REWARD_STEPS=2,
-        GIF_FREQUENCY=20000
+        GAMMA=0.99,
+        REWARD_STEPS=1,
+        GIF_FREQUENCY=10000
     )
 
     hp.SAVE_PATH = os.path.join("saves", hp.AGENT, hp.EXP_NAME)
