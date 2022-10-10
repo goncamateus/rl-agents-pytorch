@@ -6,10 +6,10 @@ class DelayedObservationWrapper(gym.ObservationWrapper):
     def __init__(self, env, delay=1):
         super().__init__(env)
         self.delay = delay
-        self._obs_buffer = [np.zeros(*self.env.observation_space.shape)] * delay
+        self._obs_buffer = [np.zeros(self.env.observation_space.shape)] * delay
 
     def reset(self):
-        self._obs_buffer = [np.zeros(*self.env.observation_space.shape)] * self.delay
+        self._obs_buffer = [np.zeros(self.env.observation_space.shape)] * self.delay
         return self.env.reset()
 
     def step(self, action):
@@ -37,3 +37,31 @@ class ObsWithActionWrapper(gym.ObservationWrapper):
 
     def reset(self):
         return np.concatenate([self.env.reset(), np.zeros(self.env.action_space.shape)])
+
+
+class FrameStack(gym.ObservationWrapper):
+    def __init__(self, env, stack_size=4):
+        super().__init__(env)
+        self.stack_size = stack_size
+        self.observation_space = gym.spaces.Box(
+            shape=(
+                self.env.observation_space.shape[0] * self.stack_size,
+            ),
+            high=1,
+            low=-1,
+            dtype=np.float32,
+        )
+        self._obs_buffer = [np.zeros(self.env.observation_space.shape)] * stack_size
+
+    def reset(self):
+        self._obs_buffer = [np.zeros(self.env.observation_space.shape)] * self.stack_size
+        obs = self.env.reset()
+        self._obs_buffer.append(obs)
+        obs = np.concatenate(self._obs_buffer[-self.stack_size :])
+        return obs
+
+    def step(self, action):
+        obs, reward, done, info = self.env.step(action)
+        self._obs_buffer.append(obs)
+        obs = np.concatenate(self._obs_buffer[-self.stack_size :])
+        return obs, reward, done, info

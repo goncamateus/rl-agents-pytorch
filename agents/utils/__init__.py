@@ -4,4 +4,4 @@ from .gif import *
 from .noise import *
 from .buffer import ReplayBuffer
 from .env import MultiEnv
-from .wrappers import DelayedObservationWrapper, ObsWithActionWrapper
+from .wrappers import DelayedObservationWrapper, ObsWithActionWrapper, FrameStack

@@ -52,10 +52,11 @@ if __name__ == "__main__":
         NOISE_SIGMA_GRAD_STEPS=3000,
         REPLAY_SIZE=5000000,
         REPLAY_INITIAL=100000,
-        SAVE_FREQUENCY=100000,
+        SAVE_FREQUENCY=50000,
         GIF_FREQUENCY=50000,
         TOTAL_GRAD_STEPS=2000000,
-        DELAY=3
+        DELAY=3,
+        STACK_SIZE=10
     )
     wandb.init(project='RC-testes', name=hp.EXP_NAME,  entity='goncamateus', config=hp.to_dict())
     current_time = datetime.datetime.now().strftime('%b-%d_%H-%M-%S')

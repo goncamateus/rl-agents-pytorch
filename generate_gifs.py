@@ -47,5 +47,5 @@ if __name__ == "__main__":
     traced_script_module = torch.jit.trace(pi, obs)
     torch.jit.save(traced_script_module, "atk.pt")
     
-    generate_gif(env=env, filepath=args.checkpoint.replace(
-        "pth", "gif").replace("checkpoint", "gif"), pi=pi, hp=checkpoint)
+    # generate_gif(env=env, filepath=args.checkpoint.replace(
+    #     "pth", "gif").replace("checkpoint", "gif"), pi=pi, hp=checkpoint)
