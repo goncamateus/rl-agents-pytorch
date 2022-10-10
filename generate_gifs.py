@@ -9,6 +9,7 @@ import torch
 from agents.ddpg import DDPGActor
 from agents.sac import GaussianPolicy
 from agents.utils.gif import generate_gif
+from agents.utils.wrappers import ObsWithActionWrapper
 
 
 def get_env_specs(env_name):
@@ -28,6 +29,7 @@ if __name__ == "__main__":
     checkpoint = torch.load(args.checkpoint)
 
     env = gym.make(checkpoint['ENV_NAME'])
+    env = ObsWithActionWrapper(env)
 
     if checkpoint['AGENT'] == 'ddpg_async':
         pi = DDPGActor(checkpoint['N_OBS'], checkpoint['N_ACTS']).to(device)
@@ -40,6 +42,10 @@ if __name__ == "__main__":
 
     pi.load_state_dict(checkpoint['pi_state_dict'])
     pi.eval()
-
+    obs = env.reset()
+    obs = torch.Tensor(obs).to(device)
+    traced_script_module = torch.jit.trace(pi, obs)
+    torch.jit.save(traced_script_module, "atk.pt")
+    
     generate_gif(env=env, filepath=args.checkpoint.replace(
-        "pth", "gif").replace("checkpoint", "gif"), pi=pi, device=device)
+        "pth", "gif").replace("checkpoint", "gif"), pi=pi, hp=checkpoint)

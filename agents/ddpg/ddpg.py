@@ -1,18 +1,15 @@
-import torch
 import collections
-import time
-import gym
 import copy
-import numpy as np
-from agents.utils import (
-    NStepTracer,
-    OrnsteinUhlenbeckNoise,
-    generate_gif,
-    HyperParameters,
-    ExperienceFirstLast,
-)
 import os
+import time
 from dataclasses import dataclass
+
+import gym
+import numpy as np
+import torch
+from agents.utils import (DelayedObservationWrapper, ObsWithActionWrapper,ExperienceFirstLast,
+                          HyperParameters, OrnsteinUhlenbeckNoise,
+                          generate_gif)
 
 
 @dataclass
@@ -28,6 +25,8 @@ class DDPGHP(HyperParameters):
 
 def data_func(pi, device, queue_m, finish_event_m, sigma_m, gif_req_m, hp):
     env = gym.make(hp.ENV_NAME)
+    env = ObsWithActionWrapper(env)
+    env = DelayedObservationWrapper(env, delay=hp.DELAY)
     noise = OrnsteinUhlenbeckNoise(
         sigma=sigma_m.value,
         theta=hp.NOISE_THETA,

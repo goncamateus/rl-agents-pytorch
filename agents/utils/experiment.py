@@ -1,16 +1,17 @@
 import dataclasses
+import os
 
 import gym
 import rsoccer_gym
 import torch
-import os
-
 import wandb
+from agents.utils.wrappers import DelayedObservationWrapper, ObsWithActionWrapper
 
 
 @dataclasses.dataclass
 class HyperParameters:
     """Class containing all experiment hyperparameters"""
+
     EXP_NAME: str
     ENV_NAME: str
     N_ROLLOUT_PROCESSES: int
@@ -31,20 +32,25 @@ class HyperParameters:
     DEVICE: str = None
     TOTAL_GRAD_STEPS: int = None
     MULTI_AGENT: bool = False
+    DELAY: int = 1
 
     def to_dict(self):
         return self.__dict__
 
     def __post_init__(self):
         env = gym.make(self.ENV_NAME)
-        self.N_OBS, self.N_ACTS, self.MAX_EPISODE_STEPS = env.observation_space.shape[
-            0], env.action_space.shape[0], env.spec.max_episode_steps
+        env = ObsWithActionWrapper(env)
+        env = DelayedObservationWrapper(env, delay=self.DELAY)
+        self.N_OBS, self.N_ACTS, self.MAX_EPISODE_STEPS = (
+            env.observation_space.shape[0],
+            env.action_space.shape[0],
+            env.spec.max_episode_steps,
+        )
         if self.MULTI_AGENT:
             self.N_AGENTS = env.action_space.shape[0]
             self.N_ACTS = env.action_space.shape[1]
             self.N_OBS = env.observation_space.shape[1]
-        self.SAVE_PATH = os.path.join(
-            "saves", self.ENV_NAME, self.AGENT, self.EXP_NAME)
+        self.SAVE_PATH = os.path.join("saves", self.ENV_NAME, self.AGENT, self.EXP_NAME)
         self.CHECKPOINT_PATH = os.path.join(self.SAVE_PATH, "checkpoints")
         self.GIF_PATH = os.path.join(self.SAVE_PATH, "gifs")
         os.makedirs(self.CHECKPOINT_PATH, exist_ok=True)
@@ -52,15 +58,12 @@ class HyperParameters:
         self.action_space = env.action_space
         self.observation_space = env.observation_space
         if self.MULTI_AGENT:
-            self.action_space.shape = (env.action_space.shape[1], )
-            self.observation_space.shape = (env.observation_space.shape[1], )
+            self.action_space.shape = (env.action_space.shape[1],)
+            self.observation_space.shape = (env.observation_space.shape[1],)
 
 
-def unpack_batch(
-    batch,
-    device="cpu"
-):
-    '''From a batch of experience, return values in Tensor form on device'''
+def unpack_batch(batch, device="cpu"):
+    """From a batch of experience, return values in Tensor form on device"""
     states, actions, rewards, dones, last_states = [], [], [], [], []
     for exp in batch:
         states.append(exp.state)
@@ -79,30 +82,28 @@ def unpack_batch(
     return states_v, actions_v, rewards_v, dones_t, last_states_v
 
 
-def save_checkpoint(
-    hp,
-    metrics,
-    pi,
-    Q,
-    pi_opt,
-    Q_opt
-):
+def save_checkpoint(hp, metrics, pi, Q, pi_opt, Q_opt):
     checkpoint = dataclasses.asdict(hp)
     checkpoint.update(metrics)
     if not isinstance(pi, list):
-        checkpoint.update({
-            "pi_state_dict": pi.state_dict(),
-            "Q_state_dict": Q.state_dict(),
-            "pi_opt_state_dict": pi_opt.state_dict(),
-            "Q_opt_state_dict": Q_opt.state_dict(),
-        })
+        checkpoint.update(
+            {
+                "pi_state_dict": pi.state_dict(),
+                "Q_state_dict": Q.state_dict(),
+                "pi_opt_state_dict": pi_opt.state_dict(),
+                "Q_opt_state_dict": Q_opt.state_dict(),
+            }
+        )
     else:
-        checkpoint.update({
-            "pi_state_dict": [net.state_dict() for net in pi],
-            "Q_state_dict": [net.state_dict() for net in Q],
-            "pi_opt_state_dict": [opt.state_dict() for opt in pi_opt],
-            "Q_opt_state_dict": [opt.state_dict() for opt in Q_opt],
-        })
+        checkpoint.update(
+            {
+                "pi_state_dict": [net.state_dict() for net in pi],
+                "Q_state_dict": [net.state_dict() for net in Q],
+                "pi_opt_state_dict": [opt.state_dict() for opt in pi_opt],
+                "Q_opt_state_dict": [opt.state_dict() for opt in Q_opt],
+            }
+        )
     filename = os.path.join(
-        hp.CHECKPOINT_PATH, "checkpoint_{:09}.pth".format(metrics['n_grads']))
+        hp.CHECKPOINT_PATH, "checkpoint_{:09}.pth".format(metrics["n_grads"])
+    )
     torch.save(checkpoint, filename)
