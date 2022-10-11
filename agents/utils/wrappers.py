@@ -57,11 +57,13 @@ class FrameStack(gym.ObservationWrapper):
         self._obs_buffer = [np.zeros(self.env.observation_space.shape)] * self.stack_size
         obs = self.env.reset()
         self._obs_buffer.append(obs)
-        obs = np.concatenate(self._obs_buffer[-self.stack_size :])
+        self._obs_buffer.pop(0)
+        obs = np.concatenate(self._obs_buffer)
         return obs
 
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
         self._obs_buffer.append(obs)
-        obs = np.concatenate(self._obs_buffer[-self.stack_size :])
+        self._obs_buffer.pop(0)
+        obs = np.concatenate(self._obs_buffer)
         return obs, reward, done, info

@@ -46,7 +46,7 @@ class HyperParameters:
         env = gym.make(self.ENV_NAME)
         env = ObsWithActionWrapper(env)
         env = FrameStack(env, self.STACK_SIZE)
-        env = DelayedObservationWrapper(env, delay=self.DELAY)
+        # env = DelayedObservationWrapper(env, delay=self.DELAY)
         self.N_OBS, self.N_ACTS, self.MAX_EPISODE_STEPS = (
             env.observation_space.shape[0],
             env.action_space.shape[0],

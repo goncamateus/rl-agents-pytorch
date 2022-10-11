@@ -27,7 +27,7 @@ def data_func(pi, device, queue_m, finish_event_m, sigma_m, gif_req_m, hp):
     env = gym.make(hp.ENV_NAME)
     env = ObsWithActionWrapper(env)
     env = FrameStack(env, hp.STACK_SIZE)
-    env = DelayedObservationWrapper(env, delay=hp.DELAY)
+    # env = DelayedObservationWrapper(env, delay=hp.DELAY)
     noise = OrnsteinUhlenbeckNoise(
         sigma=sigma_m.value,
         theta=hp.NOISE_THETA,
