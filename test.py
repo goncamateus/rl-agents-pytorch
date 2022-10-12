@@ -15,10 +15,11 @@ obs = env.reset()
 
 # print(env.action_space.shape)
 model = DDPGActor(obs.shape[0], env.action_space.shape[0])
-model.load_state_dict(torch.load('checkpoint_000300000.pth')['pi_state_dict'])
+model.load_state_dict(torch.load('checkpoint_000750000.pth')['pi_state_dict'])
 
 obs = torch.FloatTensor(obs)
+print(model)
 
 traced_script_module = torch.jit.trace(model, obs)
 
-torch.jit.save(traced_script_module, 'atk-3.pt')
+torch.jit.save(traced_script_module, 'atk-4.pt')

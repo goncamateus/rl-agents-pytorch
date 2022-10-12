@@ -7,9 +7,10 @@ from dataclasses import dataclass
 import gym
 import numpy as np
 import torch
-from agents.utils import (DelayedObservationWrapper, ObsWithActionWrapper,ExperienceFirstLast,
-                          HyperParameters, OrnsteinUhlenbeckNoise,
-                          generate_gif, FrameStack)
+from agents.utils import (DelayedObservationWrapper, ExperienceFirstLast,
+                          FrameStack, HyperParameters, ObsWithActionWrapper,
+                          OrnsteinUhlenbeckNoise, SkipFrameWrapper,
+                          generate_gif)
 
 
 @dataclass
@@ -26,6 +27,7 @@ class DDPGHP(HyperParameters):
 def data_func(pi, device, queue_m, finish_event_m, sigma_m, gif_req_m, hp):
     env = gym.make(hp.ENV_NAME)
     env = ObsWithActionWrapper(env)
+    env = SkipFrameWrapper(env, hp.SKIP)
     env = FrameStack(env, hp.STACK_SIZE)
     # env = DelayedObservationWrapper(env, delay=hp.DELAY)
     noise = OrnsteinUhlenbeckNoise(

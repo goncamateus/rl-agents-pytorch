@@ -56,7 +56,8 @@ if __name__ == "__main__":
         GIF_FREQUENCY=50000,
         TOTAL_GRAD_STEPS=2000000,
         DELAY=3,
-        STACK_SIZE=10
+        STACK_SIZE=10,
+        SKIP=3,
     )
     wandb.init(project='RC-testes', name=hp.EXP_NAME,  entity='goncamateus', config=hp.to_dict())
     current_time = datetime.datetime.now().strftime('%b-%d_%H-%M-%S')

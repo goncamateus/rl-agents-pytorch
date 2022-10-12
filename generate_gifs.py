@@ -34,7 +34,7 @@ if __name__ == "__main__":
 
     env = gym.make(checkpoint["ENV_NAME"])
     env = ObsWithActionWrapper(env)
-    env = FrameStack(env, 10)
+    env = FrameStack(env, 50)
 
     if checkpoint["AGENT"] == "ddpg_async":
         pi = DDPGActor(checkpoint["N_OBS"], checkpoint["N_ACTS"]).to(device)

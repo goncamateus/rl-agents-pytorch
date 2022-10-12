@@ -5,11 +5,8 @@ import gym
 import rsoccer_gym
 import torch
 import wandb
-from agents.utils.wrappers import (
-    DelayedObservationWrapper,
-    ObsWithActionWrapper,
-    FrameStack,
-)
+from agents.utils.wrappers import (DelayedObservationWrapper, FrameStack,
+                                   ObsWithActionWrapper, SkipFrameWrapper)
 
 
 @dataclasses.dataclass
@@ -38,6 +35,7 @@ class HyperParameters:
     MULTI_AGENT: bool = False
     DELAY: int = 1
     STACK_SIZE: int = 1
+    SKIP: int = 1
 
     def to_dict(self):
         return self.__dict__
@@ -45,6 +43,7 @@ class HyperParameters:
     def __post_init__(self):
         env = gym.make(self.ENV_NAME)
         env = ObsWithActionWrapper(env)
+        env = SkipFrameWrapper(env, self.SKIP)
         env = FrameStack(env, self.STACK_SIZE)
         # env = DelayedObservationWrapper(env, delay=self.DELAY)
         self.N_OBS, self.N_ACTS, self.MAX_EPISODE_STEPS = (

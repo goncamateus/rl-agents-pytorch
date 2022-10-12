@@ -67,3 +67,21 @@ class FrameStack(gym.ObservationWrapper):
         self._obs_buffer.pop(0)
         obs = np.concatenate(self._obs_buffer)
         return obs, reward, done, info
+
+class SkipFrameWrapper(gym.ObservationWrapper):
+    def __init__(self, env, skip=4):
+        super().__init__(env)
+        self.skip = skip
+
+    def reset(self):
+        obs = self.env.reset()
+        return obs
+
+    def step(self, action):
+        total_reward = 0
+        for _ in range(self.skip):
+            obs, reward, done, info = self.env.step(action)
+            total_reward += reward
+            if done:
+                break
+        return obs, total_reward, done, info
